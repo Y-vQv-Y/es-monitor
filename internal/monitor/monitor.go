@@ -26,6 +26,7 @@ type Monitor struct {
 	ticker           *time.Ticker
 	stopChan         chan struct{}
 	wg               sync.WaitGroup
+	mu               sync.Mutex
 }
 
 // NewMonitor 创建监控器
@@ -44,7 +45,7 @@ func NewMonitor(client *client.ElasticsearchClient, cfg *config.Config) *Monitor
 	}
 }
 
-// Start 启动监控
+// Start 启动监控（生产环境安全）
 func (m *Monitor) Start(ctx context.Context) {
 	m.ticker = time.NewTicker(m.config.Interval)
 	defer m.ticker.Stop()
@@ -65,18 +66,19 @@ func (m *Monitor) Start(ctx context.Context) {
 	}
 }
 
-// Stop 停止监控
+// Stop 安全停止监控
 func (m *Monitor) Stop() {
 	close(m.stopChan)
 	m.wg.Wait()
 }
 
-// collect 采集并显示所有指标
+// collect 采集并显示所有指标（只读操作）
 func (m *Monitor) collect(ctx context.Context) {
 	m.wg.Add(1)
 	defer m.wg.Done()
 
-	now := time.Now() // 统一时间戳（修复一致性）
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	// 显示标题
 	m.terminal.DisplayHeader()
@@ -90,16 +92,27 @@ func (m *Monitor) collect(ctx context.Context) {
 	}
 	m.terminal.DisplayClusterHealth(health)
 
-	// 2. 采集节点统计
+	// 2. 采集系统指标（优先显示，最关心的指标）
+	sysMetrics, err := m.systemCollector.Collect(ctx)
+	if err != nil {
+		m.terminal.DisplayError("获取系统指标失败", err)
+	} else {
+		// 显示完整的系统资源监控
+		m.terminal.DisplaySystemMetrics(sysMetrics)
+		m.terminal.DisplayDiskMetrics(&sysMetrics.Disk)
+		m.terminal.DisplayNetworkMetrics(&sysMetrics.Network)
+	}
+
+	// 3. 采集节点统计
 	nodeStats, err := m.nodeCollector.Collect(ctx)
 	if err != nil {
 		m.terminal.DisplayError("获取节点统计失败", err)
 	} else {
 		m.terminal.DisplayNodeStats(nodeStats, m.prevNodeData)
-		m.updateNodePrevData(nodeStats, now)
+		m.updateNodePrevData(nodeStats)
 	}
 
-	// 3. 采集索引统计
+	// 4. 采集索引统计
 	indexList, err := m.indexCollector.CollectList(ctx)
 	if err != nil {
 		m.terminal.DisplayError("获取索引列表失败", err)
@@ -109,16 +122,8 @@ func (m *Monitor) collect(ctx context.Context) {
 			m.terminal.DisplayError("获取索引统计失败", err)
 		} else {
 			m.terminal.DisplayIndexStats(indexList, indexStats, m.prevIndexData)
-			m.updateIndexPrevData(indexStats, now)
+			m.updateIndexPrevData(indexStats)
 		}
-	}
-
-	// 4. 采集系统指标
-	sysMetrics, err := m.systemCollector.Collect(ctx)
-	if err != nil {
-		m.terminal.DisplayError("获取系统指标失败", err)
-	} else {
-		m.terminal.DisplaySystemMetrics(sysMetrics)
 	}
 
 	// 显示页脚
@@ -126,7 +131,8 @@ func (m *Monitor) collect(ctx context.Context) {
 }
 
 // updateNodePrevData 更新节点历史数据
-func (m *Monitor) updateNodePrevData(stats *model.NodeStats, now time.Time) {
+func (m *Monitor) updateNodePrevData(stats *model.NodeStats) {
+	now := time.Now()
 	for nodeID, node := range stats.Nodes {
 		m.prevNodeData[nodeID] = &display.PrevNodeMetrics{
 			IndexTotal: node.Indices.Indexing.IndexTotal,
@@ -137,7 +143,8 @@ func (m *Monitor) updateNodePrevData(stats *model.NodeStats, now time.Time) {
 }
 
 // updateIndexPrevData 更新索引历史数据
-func (m *Monitor) updateIndexPrevData(stats *model.IndexStats, now time.Time) {
+func (m *Monitor) updateIndexPrevData(stats *model.IndexStats) {
+	now := time.Now()
 	for indexName, indexStat := range stats.Indices {
 		m.prevIndexData[indexName] = &display.PrevIndexMetrics{
 			IndexTotal: indexStat.Total.Indexing.IndexTotal,
