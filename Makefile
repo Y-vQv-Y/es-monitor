@@ -1,19 +1,21 @@
-.PHONY: build clean run install test lint
+.PHONY: build clean run install test lint fmt help build-all docker-build
 
-# 项目名称
+# 项目信息
 BINARY_NAME=es-monitor
 VERSION=1.0.0
+BUILD_DIR=build
+MAIN_PATH=./cmd/monitor
 
-# Go 参数
+# Go 命令
 GOCMD=go
 GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
-GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
+GOFMT=$(GOCMD) fmt
 
-# 构建目录
-BUILD_DIR=build
+# 构建标志 - 只读操作，生产环境安全
+LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(shell date -u '+%Y-%m-%d_%H:%M:%S')"
 
 # 默认目标
 all: clean build
@@ -22,40 +24,38 @@ all: clean build
 build:
 	@echo "构建 $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) -o $$ (BUILD_DIR)/ $$(BINARY_NAME) -v ./cmd/monitor
-	@echo "构建完成: $$ (BUILD_DIR)/ $$(BINARY_NAME)"
+	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) -v $(MAIN_PATH)
+	@echo "构建完成: $(BUILD_DIR)/$(BINARY_NAME)"
 
 # 跨平台编译
 build-all: build-linux build-mac build-windows
+	@echo "所有平台构建完成"
 
 build-linux:
 	@echo "构建 Linux 版本..."
 	@mkdir -p $(BUILD_DIR)
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $$ (BUILD_DIR)/ $$(BINARY_NAME)-linux-amd64 ./cmd/monitor
-	@echo "构建完成: $$ (BUILD_DIR)/ $$(BINARY_NAME)-linux-amd64"
+	GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 $(MAIN_PATH)
 
 build-mac:
 	@echo "构建 macOS 版本..."
 	@mkdir -p $(BUILD_DIR)
-	GOOS=darwin GOARCH=amd64 $(GOBUILD) -o $$ (BUILD_DIR)/ $$(BINARY_NAME)-darwin-amd64 ./cmd/monitor
-	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o $$ (BUILD_DIR)/ $$(BINARY_NAME)-darwin-arm64 ./cmd/monitor
-	@echo "构建完成: $$ (BUILD_DIR)/ $$(BINARY_NAME)-darwin-*"
+	GOOS=darwin GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 $(MAIN_PATH)
+	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 $(MAIN_PATH)
 
 build-windows:
 	@echo "构建 Windows 版本..."
 	@mkdir -p $(BUILD_DIR)
-	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $$ (BUILD_DIR)/ $$(BINARY_NAME)-windows-amd64.exe ./cmd/monitor
-	@echo "构建完成: $$ (BUILD_DIR)/ $$(BINARY_NAME)-windows-amd64.exe"
+	GOOS=windows GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(MAIN_PATH)
 
 # 运行
 run:
-	$(GOBUILD) -o $$ (BUILD_DIR)/ $$(BINARY_NAME) -v ./cmd/monitor
-	./$$ (BUILD_DIR)/ $$(BINARY_NAME)
+	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_NAME) -v $(MAIN_PATH)
+	./$(BUILD_DIR)/$(BINARY_NAME)
 
 # 运行并指定参数
 run-dev:
-	$(GOBUILD) -o $$ (BUILD_DIR)/ $$(BINARY_NAME) -v ./cmd/monitor
-	./$$ (BUILD_DIR)/ $$(BINARY_NAME) -host localhost -port 9200 -interval 2
+	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_NAME) -v $(MAIN_PATH)
+	./$(BUILD_DIR)/$(BINARY_NAME) -host localhost -port 9200 -interval 2
 
 # 清理
 clean:
@@ -76,25 +76,22 @@ test:
 	@echo "运行测试..."
 	$(GOTEST) -v ./...
 
+# 格式化代码
+fmt:
+	@echo "格式化代码..."
+	$(GOFMT) ./...
+
 # 代码检查
 lint:
 	@echo "运行代码检查..."
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "请先安装 golangci-lint"; exit 1; }
 	golangci-lint run ./...
 
-# 格式化代码
-fmt:
-	@echo "格式化代码..."
-	$(GOCMD) fmt ./...
-
-# 生成版本信息
-version:
-	@echo "版本: $(VERSION)"
-
 # Docker 构建
 docker-build:
 	@echo "构建 Docker 镜像..."
-	docker build -t $$ (BINARY_NAME): $$(VERSION) .
+	docker build -t $(BINARY_NAME):$(VERSION) .
+	docker tag $(BINARY_NAME):$(VERSION) $(BINARY_NAME):latest
 	@echo "Docker 镜像构建完成"
 
 # 帮助
@@ -107,6 +104,6 @@ help:
 	@echo "  make clean        - 清理构建文件"
 	@echo "  make install      - 安装依赖"
 	@echo "  make test         - 运行测试"
-	@echo "  make lint         - 代码检查"
 	@echo "  make fmt          - 格式化代码"
+	@echo "  make lint         - 代码检查"
 	@echo "  make docker-build - 构建 Docker 镜像"
