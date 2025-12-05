@@ -1,6 +1,6 @@
 package model
 
-// SystemMetrics 系统指标
+// SystemMetrics 系统指标（完整版）
 type SystemMetrics struct {
 	Timestamp int64
 	CPU       CPUMetrics
