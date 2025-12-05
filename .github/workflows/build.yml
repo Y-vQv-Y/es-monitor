@@ -1,57 +1,36 @@
-name: Build and Release
+name: Build ES Monitor
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [ master ]
   pull_request:
     branches: [ master ]
 
 jobs:
   build:
-    name: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # 使用 Ubuntu runner（Go 跨平台构建兼容性好）
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4  # 检出仓库代码（必须步骤）
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5  # 设置 Go 环境
       with:
-        go-version: '1.21'
+        go-version: '1.21'  # 项目使用 Go 1.21
 
     - name: Install dependencies
-      run: |
-        go mod download
-        go mod tidy
+      run: make install  # 运行 Makefile 中的 install（go mod download 和 tidy）
 
     - name: Run tests
-      run: go test -v ./...
+      run: make test  # 运行单元测试（go test -v ./...）
 
-    - name: Build
-      run: make build-all
+    - name: Build all platforms
+      run: make build-all  # 跨平台构建（Linux, macOS, Windows）
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: binaries
-        path: build/*
-
-  release:
-    name: Release
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-    - name: Download artifacts
-      uses: actions/download-artifact@v3
-      with:
-        name: binaries
-        path: build/
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: build/*
-      env:
-        GITHUB_TOKEN: ${{ secrets.ES_TOKEN }}
+        name: es-monitor-binaries  # artifacts 名称
+        path: build/*  # 上传 build/ 目录下的所有文件（二进制）
+        if-no-files-found: error  # 如果没有文件，报错
