@@ -12,7 +12,6 @@ type IndexStat struct {
 	UUID      string          `json:"uuid"`
 	Health    string          `json:"health"`
 	Status    string          `json:"status"`
-	Segments  IndexSegments   `json:"segments"` // 新增：分段信息
 }
 
 // IndexShardStats 索引分片统计
@@ -34,21 +33,6 @@ type IndexShardStats struct {
 		QueryTimeInMillis int64 `json:"query_time_in_millis"`
 		QueryCurrent      int   `json:"query_current"`
 	} `json:"search"`
-}
-
-// IndexSegments 索引分段信息（新增）
-type IndexSegments struct {
-	Count int `json:"count"`
-	MemoryInBytes int64 `json:"memory_in_bytes"`
-	TermsMemoryInBytes int64 `json:"terms_memory_in_bytes"`
-	StoredFieldsMemoryInBytes int64 `json:"stored_fields_memory_in_bytes"`
-	TermVectorsMemoryInBytes int64 `json:"term_vectors_memory_in_bytes"`
-	NormsMemoryInBytes int64 `json:"norms_memory_in_bytes"`
-	PointsMemoryInBytes int64 `json:"points_memory_in_bytes"`
-	DocValuesMemoryInBytes int64 `json:"doc_values_memory_in_bytes"`
-	IndexWriterMemoryInBytes int64 `json:"index_writer_memory_in_bytes"`
-	VersionMapMemoryInBytes int64 `json:"version_map_memory_in_bytes"`
-	FixedBitSetMemoryInBytes int64 `json:"fixed_bit_set_memory_in_bytes"`
 }
 
 // IndexInfo 索引信息
