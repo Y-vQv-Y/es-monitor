@@ -5,12 +5,14 @@
 *.so
 *.dylib
 build/
+dist/
 
 # Test binary
 *.test
 
 # Output of the go coverage tool
 *.out
+coverage.html
 
 # Dependency directories
 vendor/
@@ -28,3 +30,11 @@ go.work
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
