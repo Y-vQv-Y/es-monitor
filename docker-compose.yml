@@ -1,9 +1,11 @@
 version: '3.8'
 
 services:
+  # ES 监控工具
   es-monitor:
     build: .
     container_name: es-monitor
+    restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
     command: ["-host", "elasticsearch", "-port", "9200", "-interval", "2"]
@@ -11,18 +13,42 @@ services:
       - elasticsearch
     networks:
       - esnet
+    # 资源限制（避免影响主机）
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
 
+  # Elasticsearch (测试用)
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
     container_name: elasticsearch
+    restart: unless-stopped
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
     ports:
       - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
     networks:
       - esnet
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+volumes:
+  esdata:
+    driver: local
 
 networks:
   esnet:
