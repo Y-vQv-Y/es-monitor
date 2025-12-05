@@ -143,7 +143,7 @@ func (c *SystemCollector) collectMemory() (model.MemoryMetrics, error) {
 		memMetrics.Active = vmStat.Active
 		memMetrics.Inactive = vmStat.Inactive
 		memMetrics.Dirty = vmStat.Dirty
-		memMetrics.Writeback = vmStat.Writeback
+		memMetrics.Writeback = vmStat.WriteBack
 		memMetrics.Mapped = vmStat.Mapped
 		memMetrics.Slab = vmStat.Slab
 	}
