@@ -19,7 +19,7 @@ func NewNodeCollector(client *client.ElasticsearchClient) *NodeCollector {
 	}
 }
 
-// Collect 采集节点指标
+// Collect 采集节点指标（只读操作）
 func (c *NodeCollector) Collect(ctx context.Context) (*model.NodeStats, error) {
 	return c.client.GetNodeStats(ctx)
 }
