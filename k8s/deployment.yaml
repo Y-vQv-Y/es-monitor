@@ -1,0 +1,147 @@
+# ============================================
+# k8s/deployment.yaml
+# ============================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: es-monitor-config
+  namespace: default
+data:
+  ES_HOST: "elasticsearch.default.svc.cluster.local"
+  ES_PORT: "9200"
+  INTERVAL: "2"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: es-monitor
+  namespace: default
+  labels:
+    app: es-monitor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: es-monitor
+  template:
+    metadata:
+      labels:
+        app: es-monitor
+    spec:
+      containers:
+      - name: es-monitor
+        image: es-monitor:1.0.0
+        imagePullPolicy: IfNotPresent
+        command: ["/root/es-monitor"]
+        args:
+          - "-host"
+          - "$(ES_HOST)"
+          - "-port"
+          - "$(ES_PORT)"
+          - "-interval"
+          - "$(INTERVAL)"
+        env:
+        - name: ES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: es-monitor-config
+              key: ES_HOST
+        - name: ES_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: es-monitor-config
+              key: ES_PORT
+        - name: INTERVAL
+          valueFrom:
+            configMapKeyRef:
+              name: es-monitor-config
+              key: INTERVAL
+        - name: TZ
+          value: "Asia/Shanghai"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        # 如果需要查看日志
+        stdin: true
+        tty: true
+
+---
+# 如果需要通过 Service 访问（虽然这是命令行工具）
+apiVersion: v1
+kind: Service
+metadata:
+  name: es-monitor
+  namespace: default
+spec:
+  selector:
+    app: es-monitor
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
+  type: ClusterIP
+
+# ============================================
+# k8s/cronjob.yaml - 定时监控任务
+# ============================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: es-monitor-check
+  namespace: default
+spec:
+  # 每小时执行一次
+  schedule: "0 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: es-monitor
+            image: es-monitor:1.0.0
+            imagePullPolicy: IfNotPresent
+            command: ["/root/es-monitor"]
+            args:
+              - "-host"
+              - "elasticsearch.default.svc.cluster.local"
+              - "-port"
+              - "9200"
+          restartPolicy: OnFailure
+
+# ============================================
+# k8s/rbac.yaml - 如果需要访问 K8s API
+# ============================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: es-monitor
+  namespace: default
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: es-monitor
+rules:
+- apiGroups: [""]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: es-monitor
+subjects:
+- kind: ServiceAccount
+  name: es-monitor
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: es-monitor
+  apiGroup: rbac.authorization.k8s.io
