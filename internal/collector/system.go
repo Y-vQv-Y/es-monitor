@@ -8,7 +8,7 @@ import (
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/net"
-	"github.com/yourusername/es-monitor/internal/model"
+	"github.com/Y-vQv-Y/es-monitor/internal/model"
 )
 
 // SystemCollector 系统指标采集器
