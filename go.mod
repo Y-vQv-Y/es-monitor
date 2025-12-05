@@ -1,4 +1,3 @@
-```go
 module github.com/Y-vQv-Y/es-monitor
 
 go 1.21
