@@ -12,7 +12,7 @@ import (
 	"github.com/Y-vQv-Y/es-monitor/internal/model"
 )
 
-// ElasticsearchClient ES 客户端
+// ElasticsearchClient ES 客户端（生产环境安全版本）
 type ElasticsearchClient struct {
 	baseURL string
 	client  *http.Client
