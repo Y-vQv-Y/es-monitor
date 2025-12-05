@@ -19,7 +19,7 @@ func NewClusterCollector(client *client.ElasticsearchClient) *ClusterCollector {
 	}
 }
 
-// Collect 采集集群指标
+// Collect 采集集群指标（只读操作）
 func (c *ClusterCollector) Collect(ctx context.Context) (*model.ClusterHealth, error) {
 	return c.client.GetClusterHealth(ctx)
 }
