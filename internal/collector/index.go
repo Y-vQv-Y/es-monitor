@@ -19,28 +19,12 @@ func NewIndexCollector(client *client.ElasticsearchClient) *IndexCollector {
 	}
 }
 
-// CollectStats 采集索引统计
+// CollectStats 采集索引统计（只读操作）
 func (c *IndexCollector) CollectStats(ctx context.Context) (*model.IndexStats, error) {
-	stats, err := c.client.GetIndexStats(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// 合并分段信息
-	segments, err := c.client.GetIndexSegments(ctx)
-	if err == nil {
-		for name, seg := range segments.Indices {
-			if s, ok := stats.Indices[name]; ok {
-				s.Segments = seg.Segments
-				stats.Indices[name] = s
-			}
-		}
-	}
-
-	return stats, nil
+	return c.client.GetIndexStats(ctx)
 }
 
-// CollectList 采集索引列表
+// CollectList 采集索引列表（只读操作）
 func (c *IndexCollector) CollectList(ctx context.Context) ([]model.IndexInfo, error) {
 	return c.client.GetCatIndices(ctx)
 }
