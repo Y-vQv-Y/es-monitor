@@ -92,3 +92,135 @@ make build
 
 # 运行
 ./build/es-monitor -host localhost -port 9200
+
+# 编译所有平台
+make build-all
+
+# 单独编译
+make build-linux    # Linux
+make build-mac      # macOS
+make build-windows  # Windows
+
+# 构建镜像
+make docker-build
+
+# 运行容器
+docker run --rm es-monitor:1.0.0 -host es-host -port 9200
+
+# 使用 docker-compose
+docker-compose up
+
+
+# 创建 ConfigMap
+kubectl create configmap es-monitor-config \
+  --from-literal=ES_HOST=elasticsearch.default.svc.cluster.local \
+  --from-literal=ES_PORT=9200
+
+# 部署 Pod
+kubectl apply -f k8s/deployment.yaml
+
+
+./es-monitor [选项]
+
+选项:
+  -host string
+        Elasticsearch 主机地址 (默认 "localhost")
+  -port string
+        Elasticsearch 端口 (默认 "9200")
+  -interval int
+        刷新间隔，单位秒 (默认 2)
+  -user string
+        用户名（可选）
+  -pass string
+        密码（可选）
+
+示例:
+  # 默认连接
+  ./es-monitor
+
+  # 指定地址
+  ./es-monitor -host 192.168.1.100 -port 9200
+
+  # 快捷方式
+  ./es-monitor 192.168.1.100:9200
+
+  # 带认证
+  ./es-monitor -host es-host -port 9200 -user elastic -pass password
+
+  # 自定义刷新间隔（5秒）
+  ./es-monitor -host es-host -port 9200 -interval 5
+
+监控阈值
+默认告警阈值
+
+JVM 堆内存
+警告: 75%
+严重: 85%
+
+CPU 使用率
+警告: 60%
+严重: 80%
+
+系统内存
+警告: 80%
+严重: 90%
+
+磁盘使用
+警告: 80%
+严重: 90%
+可在 internal/config/config.go 中自定义阈值。
+
+
+项目结构
+
+es-monitor/
+├── cmd/monitor/          # 程序入口
+├── internal/
+│   ├── client/          # ES 客户端
+│   ├── collector/       # 指标采集器
+│   ├── config/          # 配置管理
+│   ├── display/         # 终端显示
+│   ├── model/           # 数据模型
+│   └── monitor/         # 监控核心
+├── pkg/util/            # 工具函数
+├── build/               # 构建输出
+├── Makefile             # 构建脚本
+├── Dockerfile           # Docker 配置
+├── docker-compose.yml   # Docker Compose 配置
+└── README.md            # 项目文档
+
+
+扩展开发
+添加新的采集器
+
+在 internal/collector/ 创建新文件
+实现采集接口
+在 internal/monitor/monitor.go 中集成
+
+添加新的显示模块
+
+在 internal/display/terminal.go 添加显示方法
+在 internal/monitor/monitor.go 中调用
+
+添加新的数据模型
+
+在 internal/model/ 定义结构体
+在 collector 中使用
+
+
+贡献
+欢迎提交 Issue 和 Pull Request！
+
+许可证
+MIT License
+
+作者
+Y-vQv-Y
+
+更新日志
+v1.0.0 (2024-01-01)
+
+初始版本发布
+支持集群、节点、索引监控
+支持系统资源详细监控
+支持异常自动告警
