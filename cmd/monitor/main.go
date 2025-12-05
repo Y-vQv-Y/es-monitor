@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yourusername/es-monitor/internal/client"
-	"github.com/yourusername/es-monitor/internal/config"
-	"github.com/yourusername/es-monitor/internal/monitor"
+	"github.com/Y-vQv-Y/es-monitor/internal/client"
+	"github.com/Y-vQv-Y/es-monitor/internal/config"
+	"github.com/Y-vQv-Y/es-monitor/internal/monitor"
 )
 
 func main() {
