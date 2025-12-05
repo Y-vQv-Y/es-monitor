@@ -6,12 +6,18 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Y-vQv-Y/es-monitor/internal/client"
 	"github.com/Y-vQv-Y/es-monitor/internal/config"
 	"github.com/Y-vQv-Y/es-monitor/internal/monitor"
+)
+
+var (
+	Version   = "1.0.0"
+	BuildTime = "unknown"
 )
 
 func main() {
@@ -22,8 +28,23 @@ func main() {
 		interval = flag.Int("interval", 2, "刷新间隔（秒）")
 		username = flag.String("user", "", "用户名（可选）")
 		password = flag.String("pass", "", "密码（可选）")
+		version  = flag.Bool("version", false, "显示版本信息")
+		readonly = flag.Bool("readonly", true, "只读模式（生产环境必须开启）")
 	)
 	flag.Parse()
+
+	// 显示版本
+	if *version {
+		fmt.Printf("ES Monitor Version: %s\n", Version)
+		fmt.Printf("Build Time: %s\n", BuildTime)
+		os.Exit(0)
+	}
+
+	// 生产环境安全检查
+	if !*readonly {
+		fmt.Println("[警告] 非只读模式在生产环境中不安全，强制启用只读模式")
+		*readonly = true
+	}
 
 	// 如果第一个参数是 host:port 格式
 	if flag.NArg() > 0 {
@@ -43,7 +64,14 @@ func main() {
 		Username: *username,
 		Password: *password,
 		Interval: time.Duration(*interval) * time.Second,
+		ReadOnly: *readonly,
 	}
+
+	// 显示启动信息
+	fmt.Println("===========================================")
+	fmt.Printf("ES Monitor v%s\n", Version)
+	fmt.Println("生产环境安全监控工具 - 只读模式")
+	fmt.Println("===========================================")
 
 	// 创建 ES 客户端
 	esClient := client.NewElasticsearchClient(cfg)
@@ -70,8 +98,9 @@ func main() {
 
 	// 等待退出信号
 	<-sigChan
-	fmt.Println("\n正在退出...")
+	fmt.Println("\n正在安全退出...")
 	mon.Stop()
+	fmt.Println("已安全退出")
 }
 
 func parseAddress(addr string) (host, port string) {
