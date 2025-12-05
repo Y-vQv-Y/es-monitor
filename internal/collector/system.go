@@ -143,7 +143,7 @@ func (c *SystemCollector) collectMemory() (model.MemoryMetrics, error) {
 		memMetrics.Active = vmStat.Active
 		memMetrics.Inactive = vmStat.Inactive
 		memMetrics.Dirty = vmStat.Dirty
-		memMetrics.Writeback = vmStat.WriteBack
+		memMetrics.Writeback = vmStat.Writeback
 		memMetrics.Mapped = vmStat.Mapped
 		memMetrics.Slab = vmStat.Slab
 	}
@@ -363,10 +363,10 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 	}
 
 	// 网络连接统计（可选，避免对性能影响）
-	// connections, err := net.Connections("tcp")
-	// if err == nil {
+	connections, err := net.Connections("tcp")
+	if err == nil {
 	//     // 统计各种状态的连接数
-	// }
+	}
 
 	return netMetrics, nil
 }
