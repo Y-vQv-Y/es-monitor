@@ -5,11 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourusername/es-monitor/internal/client"
-	"github.com/yourusername/es-monitor/internal/collector"
-	"github.com/yourusername/es-monitor/internal/config"
-	"github.com/yourusername/es-monitor/internal/display"
-	"github.com/yourusername/es-monitor/internal/model"
+	"github.com/Y-vQv-Y/es-monitor/internal/client"
+	"github.com/Y-vQv-Y/es-monitor/internal/collector"
+	"github.com/Y-vQv-Y/es-monitor/internal/config"
+	"github.com/Y-vQv-Y/es-monitor/internal/display"
+	"github.com/Y-vQv-Y/es-monitor/internal/model"
 )
 
 // Monitor 监控器
