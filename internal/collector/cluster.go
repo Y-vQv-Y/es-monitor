@@ -3,8 +3,8 @@ package collector
 import (
 	"context"
 
-	"github.com/yourusername/es-monitor/internal/client"
-	"github.com/yourusername/es-monitor/internal/model"
+	"github.com/Y-vQv-Y/es-monitor/internal/client"
+	"github.com/Y-vQv-Y/es-monitor/internal/model"
 )
 
 // ClusterCollector 集群指标采集器
