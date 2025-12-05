@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourusername/es-monitor/internal/config"
-	"github.com/yourusername/es-monitor/internal/model"
+	"github.com/Y-vQv-Y/es-monitor/internal/config"
+	"github.com/Y-vQv-Y/es-monitor/internal/model"
 )
 
 const (
