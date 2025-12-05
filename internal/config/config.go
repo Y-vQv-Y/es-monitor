@@ -9,6 +9,7 @@ type Config struct {
 	Username string
 	Password string
 	Interval time.Duration
+	ReadOnly bool // 只读模式，生产环境必须为 true
 }
 
 // Thresholds 阈值配置
@@ -33,4 +34,27 @@ var DefaultThresholds = Thresholds{
 	MemoryCritical:  90,
 	DiskWarning:     80,
 	DiskCritical:    90,
+}
+
+// SafetyConfig 生产环境安全配置
+type SafetyConfig struct {
+	// 只允许读取操作的 API 端点
+	AllowedEndpoints []string
+	// 请求超时时间（避免长时间占用连接）
+	RequestTimeout time.Duration
+	// 最大并发请求数（避免对 ES 造成压力）
+	MaxConcurrency int
+}
+
+// DefaultSafetyConfig 默认安全配置
+var DefaultSafetyConfig = SafetyConfig{
+	AllowedEndpoints: []string{
+		"/_cluster/health",
+		"/_nodes/stats",
+		"/_stats",
+		"/_cat/indices",
+		"/",
+	},
+	RequestTimeout: 10 * time.Second,
+	MaxConcurrency: 5,
 }
