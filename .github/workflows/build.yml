@@ -1,36 +1,199 @@
-name: Build ES Monitor
+name: Build and Release
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main, master ]
+    tags:
+      - 'v*'
   pull_request:
-    branches: [ master ]
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.21'
 
 jobs:
-  build:
-    runs-on: ubuntu-latest  # 使用 Ubuntu runner（Go 跨平台构建兼容性好）
-
+  test:
+    name: Test
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4  # 检出仓库代码（必须步骤）
+      uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v5  # 设置 Go 环境
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.21'  # 项目使用 Go 1.21
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
 
     - name: Install dependencies
-      run: make install  # 运行 Makefile 中的 install（go mod download 和 tidy）
+      run: |
+        go mod download
+        go mod tidy
 
     - name: Run tests
-      run: make test  # 运行单元测试（go test -v ./...）
+      run: go test -v -race -coverprofile=coverage.out ./...
 
-    - name: Build all platforms
-      run: make build-all  # 跨平台构建（Linux, macOS, Windows）
+    - name: Upload coverage
+      uses: codecov/codecov-action@v4
+      with:
+        files: ./coverage.out
+        fail_ci_if_error: false
+
+  build:
+    name: Build
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - goos: windows
+            goarch: arm64
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Build
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/}
+        if [[ "$VERSION" != v* ]]; then
+          VERSION="dev-${GITHUB_SHA::8}"
+        fi
+        
+        BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
+        LDFLAGS="-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -s -w"
+        
+        OUTPUT_NAME="es-monitor-${GOOS}-${GOARCH}"
+        if [ "$GOOS" = "windows" ]; then
+          OUTPUT_NAME="${OUTPUT_NAME}.exe"
+        fi
+        
+        mkdir -p build
+        go build -ldflags "${LDFLAGS}" -o "build/${OUTPUT_NAME}" ./cmd/monitor
+        
+        echo "Built: build/${OUTPUT_NAME}"
+        ls -lh build/
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: es-monitor-binaries  # artifacts 名称
-        path: build/*  # 上传 build/ 目录下的所有文件（二进制）
-        if-no-files-found: error  # 如果没有文件，报错
+        name: es-monitor-${{ matrix.goos }}-${{ matrix.goarch }}
+        path: build/*
+        retention-days: 7
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Prepare release assets
+      run: |
+        mkdir -p release
+        cd artifacts
+        for dir in es-monitor-*; do
+          if [ -d "$dir" ]; then
+            cd "$dir"
+            for file in *; do
+              if [[ "$file" == *.exe ]]; then
+                zip "../../release/${file%.exe}.zip" "$file"
+              else
+                tar czf "../../release/${file}.tar.gz" "$file"
+              fi
+            done
+            cd ..
+          fi
+        done
+        cd ..
+        ls -lh release/
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release/*
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Docker Build
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ${{ secrets.DOCKER_USERNAME }}/es-monitor
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha
+
+    - name: Build and push
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
