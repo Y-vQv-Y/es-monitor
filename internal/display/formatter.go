@@ -3,8 +3,6 @@ package display
 import (
 	"fmt"
 	"strings"
-
-	"github.com/Y-vQv-Y/es-monitor/pkg/util"
 )
 
 // FormatBytes 格式化字节数
@@ -19,6 +17,11 @@ func FormatBytes(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// FormatBytesUint64 格式化 uint64 字节数
+func FormatBytesUint64(bytes uint64) string {
+	return FormatBytes(int64(bytes))
 }
 
 // FormatBytesPerSec 格式化每秒字节数
@@ -44,7 +47,16 @@ func FormatRate(rate float64, unit string) string {
 
 // FormatDuration 格式化时长
 func FormatDuration(millis int64) string {
-	return util.FormatDuration(time.Duration(millis * int64(time.Millisecond))).String()
+	seconds := millis / 1000
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	} else if seconds < 3600 {
+		return fmt.Sprintf("%dm %ds", seconds/60, seconds%60)
+	} else {
+		hours := seconds / 3600
+		minutes := (seconds % 3600) / 60
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	}
 }
 
 // DrawSeparator 绘制分隔线
@@ -74,4 +86,9 @@ func TruncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// FormatFloat 格式化浮点数
+func FormatFloat(value float64, precision int) string {
+	return fmt.Sprintf("%.*f", precision, value)
 }
