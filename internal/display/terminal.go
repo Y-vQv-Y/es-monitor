@@ -425,7 +425,8 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 
 		for _, iface := range metrics.Interfaces {
 			// 跳过回环和没有流量的网卡
-			if iface.Name == "lo" || (iface.BytesSentPerSec == 0 && iface.BytesRecvPerSec == 0) {
+			// if iface.Name == "lo" || (iface.BytesSentPerSec == 0 && iface.BytesRecvPerSec == 0) {
+			if iface.Name == "lo" {
 				continue
 			}
 
