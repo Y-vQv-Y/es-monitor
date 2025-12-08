@@ -384,15 +384,22 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 	LabelColor.Println("【网络详细信息 - 实时吞吐量】")
 	fmt.Println(DrawSeparator(90, "."))
 
-	// 总体吞吐
+	// 网络总体吞吐量（字节）
 	fmt.Printf("  总体吞吐: 发送=%s, 接收=%s\n",
 		FormatBytesPerSec(metrics.BytesSentPerSec),
 		FormatBytesPerSec(metrics.BytesRecvPerSec))
 
-	sendMbps := float64(metrics.BytesSentPerSec) * 8.0 / 1024.0 / 1024.0
-	recvMbps := float64(metrics.BytesRecvPerSec) * 8.0 / 1024.0 / 1024.0
+	// 转换为 Mbps 显示
+	// sendMbps := metrics.BytesSentPerSec * 8 / 1024 / 1024
+	// recvMbps := metrics.BytesRecvPerSec * 8 / 1024 / 1024
+	// totalMbps := sendMbps + recvMbps
 
-	fmt.Printf("              (发送=%s, 接收=%s)\n",
+	sendMbps := float64(metrics.BytesSentPerSec) * 8.0 / 1024.0 / 1024.0
+    recvMbps := float64(metrics.BytesRecvPerSec) * 8.0 / 1024.0 / 1024.0
+    totalMbps := sendMbps + recvMbps
+	
+	
+	fmt.Printf("              (发送=%s, 接收=%s)\n", 
 		FormatBandwidth(sendMbps),
 		FormatBandwidth(recvMbps))
 
@@ -401,14 +408,14 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 		metrics.PacketsSentPerSec,
 		metrics.PacketsRecvPerSec)
 
-	// 累计流量
+	// 累计流量统计
 	if metrics.TotalBytesSent > 0 || metrics.TotalBytesRecv > 0 {
 		fmt.Printf("  累计流量: 发送=%s, 接收=%s\n",
 			FormatBytesUint64(metrics.TotalBytesSent),
 			FormatBytesUint64(metrics.TotalBytesRecv))
 	}
 
-	// 各网卡详细信息
+	// 各网卡详细信息（改进对齐）
 	if len(metrics.Interfaces) > 0 {
 		fmt.Println()
 		fmt.Println("  各网卡详情:")
@@ -417,46 +424,57 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 		fmt.Println("  " + DrawSeparator(110, "-"))
 
 		for _, iface := range metrics.Interfaces {
-			// 再次过滤虚拟网卡（确保展示不会包含 flannel/tunl/virbr/veth 等）
-			if isVirtualNIC(iface.Name) {
-				continue
-			}
+			// 跳过回环和没有流量的网卡
+			// if iface.Name == "lo" || (iface.BytesSentPerSec == 0 && iface.BytesRecvPerSec == 0) {
+			if strings.HasPrefix(iface.Name, "veth") ||
+               strings.HasPrefix(iface.Name, "docker") ||
+               strings.HasPrefix(iface.Name, "br-") ||
+               strings.HasPrefix(iface.Name, "cni") ||
+               strings.HasPrefix(iface.Name, "flannel") ||
+			   strings.HasPrefix(iface.Name, "tunl") ||
+			   strings.HasPrefix(iface.Name, "vlan") ||
+			   strings.HasPrefix(iface.Name, "vxlan") ||
+               strings.HasPrefix(iface.Name, "kube-ipvs") ||
+               iface.Name == "lo" {
+                 continue
+            }
+			// if iface.Name == "lo" {
+			//	   continue
+			// }
 
 			ifaceName := TruncateString(iface.Name, 16)
+			
+			// 格式化速率（自动选择单位）
 			sendRate := FormatBytesPerSec(iface.BytesSentPerSec)
 			recvRate := FormatBytesPerSec(iface.BytesRecvPerSec)
-
-			totalPackets := iface.PacketsSent + iface.PacketsRecv
-			totalDrops := iface.DropsIn + iface.DropsOut
-			errorCount := iface.ErrorsIn + iface.ErrorsOut
-
-			// 丢包率计算（百分比）
-			var dropRate float64
-			if totalPackets > 0 {
-				dropRate = float64(totalDrops) / float64(totalPackets) * 100.0
-			}
-
+			
 			fmt.Printf("  %-16s %15s %15s %14.1f %14.1f %10d %10d",
 				ifaceName,
 				sendRate,
 				recvRate,
 				iface.PacketsSentPerSec,
 				iface.PacketsRecvPerSec,
-				errorCount,
-				totalDrops)
+				iface.ErrorsIn+iface.ErrorsOut,
+				iface.DropsIn+iface.DropsOut)
 
-			// 状态判定
+			// 判断状态（改进丢包判断）
 			status := "正常"
-			if errorCount > 100 {
+			totalPackets := iface.PacketsSent + iface.PacketsRecv
+			totalDrops := iface.DropsIn + iface.DropsOut
+			var dropRate float64
+			if totalPackets > 0 {
+				dropRate = float64(totalDrops) / float64(totalPackets) * 100
+			}
+
+			if iface.ErrorsIn+iface.ErrorsOut > 100 {
 				status = "有错误"
 				StatusRed.Printf(" %10s", status)
 			} else if dropRate > 0.1 { // 丢包率 > 0.1%
 				status = "丢包"
 				StatusYellow.Printf(" %10s", status)
-			} else if totalDrops > 1000 {
-				// 累计丢包虽多但比率低，仍标记为警告但非严重
-				status = "警告"
-				StatusYellow.Printf(" %10s", status)
+			} else if totalDrops > 1000 { // 累计丢包 > 1000 但丢包率低
+				status = "正常"
+				StatusGreen.Printf(" %10s", status)
 			} else {
 				StatusGreen.Printf(" %10s", status)
 			}
