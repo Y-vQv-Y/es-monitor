@@ -30,7 +30,7 @@ func (t *Terminal) DisplayHealthIssues(issues []model.HealthIssue) {
 	infoCount := 0
 
 	for _, issue := range issues {
-		var levelColor *ColorAttr
+		var levelColor *color.Color
 		var levelText string
 
 		switch issue.Level {
