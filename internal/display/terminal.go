@@ -378,7 +378,7 @@ func (t *Terminal) DisplayDiskMetrics(metrics *model.DiskMetrics) {
 	fmt.Println()
 }
 
-// DisplayNetworkMetrics 显示网络详细信息（完整版）
+// 网卡详情：
 func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 	LabelColor.Println("【网络详细信息 - 实时吞吐量】")
 	fmt.Println(DrawSeparator(90, "."))
@@ -398,14 +398,15 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 		metrics.PacketsSentPerSec,
 		metrics.PacketsRecvPerSec)
 
-	// 错误和丢包
-	if metrics.ErrorsPerSec > 0 || metrics.DropsPerSec > 0 {
-		if metrics.ErrorsPerSec > 0 {
-			StatusRed.Printf("  错误率: %.2f errors/s [需要检查网络质量]\n", metrics.ErrorsPerSec)
-		}
-		if metrics.DropsPerSec > 0 {
-			StatusYellow.Printf("  丢包率: %.2f drops/s [可能存在网络拥塞]\n", metrics.DropsPerSec)
-		}
+	// 错误和丢包 - 只在实时速率超过阈值时显示
+	hasIssues := false
+	if metrics.ErrorsPerSec > 1.0 {  // 每秒错误数 > 1
+		StatusRed.Printf("  错误率: %.2f errors/s [需要检查网络质量]\n", metrics.ErrorsPerSec)
+		hasIssues = true
+	}
+	if metrics.DropsPerSec > 1.0 {  // 每秒丢包数 > 1
+		StatusYellow.Printf("  丢包率: %.2f drops/s [可能存在网络拥塞]\n", metrics.DropsPerSec)
+		hasIssues = true
 	}
 
 	// 累计流量统计
@@ -434,9 +435,9 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 	if len(metrics.Interfaces) > 0 {
 		fmt.Println()
 		fmt.Println("  各网卡详情:")
-		fmt.Printf("  %-15s %15s %15s %12s %12s %8s %8s\n",
-			"网卡", "发送速率", "接收速率", "发送pkt/s", "接收pkt/s", "发送错误", "接收错误")
-		fmt.Println("  " + DrawSeparator(95, "-"))
+		fmt.Printf("  %-15s %15s %15s %12s %12s %8s %8s %8s\n",
+			"网卡", "发送速率", "接收速率", "发送pkt/s", "接收pkt/s", "错误", "丢包", "状态")
+		fmt.Println("  " + DrawSeparator(105, "-"))
 
 		for _, iface := range metrics.Interfaces {
 			// 跳过回环和没有流量的网卡
@@ -452,21 +453,36 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 				FormatBytesPerSec(iface.BytesRecvPerSec),
 				iface.PacketsSentPerSec,
 				iface.PacketsRecvPerSec,
-				iface.ErrorsOut,
-				iface.ErrorsIn)
+				iface.ErrorsIn+iface.ErrorsOut,
+				iface.DropsIn+iface.DropsOut)
 
-			// 显示错误警告
-			if iface.ErrorsIn > 0 || iface.ErrorsOut > 0 {
-				StatusRed.Print(" [有错误]")
+			// 计算丢包率（相对于总包数）
+			totalPackets := iface.PacketsSent + iface.PacketsRecv
+			totalDrops := iface.DropsIn + iface.DropsOut
+			var dropRate float64
+			if totalPackets > 0 {
+				dropRate = float64(totalDrops) / float64(totalPackets) * 100
 			}
-			if iface.DropsIn > 0 || iface.DropsOut > 0 {
-				StatusYellow.Print(" [有丢包]")
+
+			// 只在丢包率或错误数显著时显示警告
+			status := "正常"
+			if iface.ErrorsIn+iface.ErrorsOut > 100 {
+				status = "有错误"
+				StatusRed.Printf(" %8s", status)
+			} else if dropRate > 0.1 { // 丢包率 > 0.1%
+				status = "丢包"
+				StatusYellow.Printf(" %8s", status)
+			} else if totalDrops > 1000 { // 累计丢包 > 1000
+				status = "轻微丢包"
+				InfoColor.Printf(" %8s", status)
+			} else {
+				StatusGreen.Printf(" %8s", status)
 			}
 			fmt.Println()
 
 			// 显示网卡状态（如果可用）
 			if iface.Speed > 0 {
-				fmt.Printf("              状态: %s, 速度: %d Mbps, MTU: %d\n",
+				fmt.Printf("              状态: %s, 速度: %d Mbps, MTU: %d",
 					func() string {
 						if iface.IsUp {
 							return "UP"
@@ -475,6 +491,12 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 					}(),
 					iface.Speed,
 					iface.MTU)
+				
+				// 显示详细丢包信息
+				if dropRate > 0.01 {
+					fmt.Printf(", 丢包率: %.3f%%", dropRate)
+				}
+				fmt.Println()
 			}
 		}
 	}
