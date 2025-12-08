@@ -15,18 +15,18 @@ type CPUMetrics struct {
 	UsagePercent float64
 	
 	// 各状态百分比
-	UserPercent   float64 // 用户态 CPU 使用率
-	SystemPercent float64 // 系统态 CPU 使用率
-	IdlePercent   float64 // 空闲 CPU 百分比
-	IOWaitPercent float64 // IO 等待百分比
-	IrqPercent    float64 // 硬中断百分比
+	UserPercent    float64 // 用户态 CPU 使用率
+	SystemPercent  float64 // 系统态 CPU 使用率
+	IdlePercent    float64 // 空闲 CPU 百分比
+	IOWaitPercent  float64 // IO 等待百分比
+	IrqPercent     float64 // 硬中断百分比
 	SoftIrqPercent float64 // 软中断百分比
-	StealPercent  float64 // 虚拟化偷取百分比
-	GuestPercent  float64 // 虚拟机 CPU 百分比
+	StealPercent   float64 // 虚拟化偷取百分比
+	GuestPercent   float64 // 虚拟机 CPU 百分比
 	
 	// CPU 核心数
-	Cores         int
-	LogicalCores  int
+	Cores        int
+	LogicalCores int
 	
 	// 负载信息
 	LoadAvg1  float64 // 1分钟负载
@@ -61,11 +61,11 @@ type MemoryMetrics struct {
 	PageIn  uint64 // 页面换入
 	PageOut uint64 // 页面换出
 	
-	// 内存压力
-	Dirty        uint64 // 脏页
-	Writeback    uint64 // 回写页
-	Mapped       uint64 // 映射内存
-	Slab         uint64 // Slab 内存
+	// 内存压力（仅 Linux 支持）
+	Dirty uint64 // 脏页
+	// Writeback 字段在某些平台不可用，已移除
+	Mapped uint64 // 映射内存
+	Slab   uint64 // Slab 内存
 	
 	// 内存活跃状态
 	Active   uint64 // 活跃内存
@@ -132,8 +132,8 @@ type DiskDeviceMetrics struct {
 // NetworkMetrics 网络详细指标
 type NetworkMetrics struct {
 	// 总体吞吐量（实时）
-	BytesSentPerSec float64 // 每秒发送字节数
-	BytesRecvPerSec float64 // 每秒接收字节数
+	BytesSentPerSec   float64 // 每秒发送字节数
+	BytesRecvPerSec   float64 // 每秒接收字节数
 	PacketsSentPerSec float64 // 每秒发送包数
 	PacketsRecvPerSec float64 // 每秒接收包数
 	
@@ -150,11 +150,11 @@ type NetworkMetrics struct {
 	TotalDrops       uint64 // 总丢包数
 	
 	// 连接统计
-	TCPConnections    int // TCP 连接数
-	TCPEstablished    int // 已建立的 TCP 连接
-	TCPListening      int // 监听状态的 TCP 连接
-	TCPTimeWait       int // TIME_WAIT 状态的连接
-	UDPConnections    int // UDP 连接数
+	TCPConnections int // TCP 连接数
+	TCPEstablished int // 已建立的 TCP 连接
+	TCPListening   int // 监听状态的 TCP 连接
+	TCPTimeWait    int // TIME_WAIT 状态的连接
+	UDPConnections int // UDP 连接数
 	
 	// 每个网卡的详细信息
 	Interfaces []InterfaceMetrics
@@ -183,10 +183,10 @@ type InterfaceMetrics struct {
 	DropsOut  uint64 // 发送丢包
 	
 	// 网卡状态
-	IsUp    bool   // 是否启用
-	MTU     int    // MTU 大小
-	Speed   uint64 // 网卡速度（Mbps）
-	Duplex  string // 双工模式
+	IsUp   bool   // 是否启用
+	MTU    int    // MTU 大小
+	Speed  uint64 // 网卡速度（Mbps）
+	Duplex string // 双工模式
 	
 	// IP 地址
 	IPv4Addresses []string
