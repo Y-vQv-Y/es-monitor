@@ -6,12 +6,10 @@ WORKDIR /app
 # 安装依赖
 RUN apk add --no-cache git make ca-certificates tzdata
 
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod tidy && \
-    go mod download
-    
+# 复制源码
 COPY . .
 
 # 构建（静态链接）
