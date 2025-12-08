@@ -192,11 +192,10 @@ func (t *Terminal) DisplaySystemMetrics(metrics *model.SystemMetrics) {
 		FormatBytesUint64(metrics.Memory.Active),
 		FormatBytesUint64(metrics.Memory.Inactive))
 
-	// 脏页和回写
-	if metrics.Memory.Dirty > 0 || metrics.Memory.Writeback > 0 {
-		fmt.Printf("  写入状态: 脏页=%s, 回写=%s\n",
-			FormatBytesUint64(metrics.Memory.Dirty),
-			FormatBytesUint64(metrics.Memory.Writeback))
+	// 脏页（Writeback 已移除，因为某些平台不支持）
+	if metrics.Memory.Dirty > 0 {
+		dirtyMB := float64(metrics.Memory.Dirty) / 1024 / 1024
+		fmt.Printf("  脏页: %.2f MB\n", dirtyMB)
 	}
 
 	// Slab 内存
