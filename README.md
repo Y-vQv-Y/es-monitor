@@ -149,8 +149,8 @@ kubectl apply -f k8s/deployment.yaml
 
   # 自定义刷新间隔（5秒）
   ./es-monitor -host es-host -port 9200 -interval 5
-
-监控阈值
+```
+### 监控阈值
 默认告警阈值
 
 JVM 堆内存
@@ -171,7 +171,7 @@ CPU 使用率
 可在 internal/config/config.go 中自定义阈值。
 
 
-项目结构
+### 项目结构
 
 es-monitor/
 ├── cmd/monitor/          # 程序入口
@@ -190,7 +190,7 @@ es-monitor/
 └── README.md            # 项目文档
 
 
-扩展开发
+### 扩展开发
 添加新的采集器
 
 在 internal/collector/ 创建新文件
@@ -208,17 +208,17 @@ es-monitor/
 在 collector 中使用
 
 
-贡献
+### 贡献
 欢迎提交 Issue 和 Pull Request！
 
-许可证
+### 许可证
 MIT License
 
-作者
+### 作者
 Y-vQv-Y
 
-更新日志
-v1.0.0 (2024-01-01)
+#### 更新日志
+v1.0.0 (2025-12-05)
 
 初始版本发布
 支持集群、节点、索引监控
