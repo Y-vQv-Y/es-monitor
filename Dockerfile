@@ -7,7 +7,7 @@ WORKDIR /app
 RUN apk add --no-cache git make ca-certificates tzdata
 
 COPY go.mod ./
-COPY go.sum* ./ 2>/dev/null || true
+COPY go.sum ./. || true
 RUN go mod tidy && go mod download
 
 # 复制源代码
