@@ -383,7 +383,7 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 	LabelColor.Println("【网络详细信息 - 实时吞吐量】")
 	fmt.Println(DrawSeparator(90, "."))
 
-	// 网络总体吞吐量
+	// 网络总体吞吐量（字节）
 	fmt.Printf("  总体吞吐: 发送=%s, 接收=%s\n",
 		FormatBytesPerSec(metrics.BytesSentPerSec),
 		FormatBytesPerSec(metrics.BytesRecvPerSec))
@@ -391,20 +391,16 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 	// 转换为 Mbps 显示
 	sendMbps := metrics.BytesSentPerSec * 8 / 1024 / 1024
 	recvMbps := metrics.BytesRecvPerSec * 8 / 1024 / 1024
-	fmt.Printf("              (发送=%.2f Mbps, 接收=%.2f Mbps)\n", sendMbps, recvMbps)
+	totalMbps := sendMbps + recvMbps
+	
+	fmt.Printf("              (发送=%s, 接收=%s)\n", 
+		FormatBandwidth(sendMbps),
+		FormatBandwidth(recvMbps))
 
 	// 数据包速率
 	fmt.Printf("  数据包率: 发送=%.1f pkt/s, 接收=%.1f pkt/s\n",
 		metrics.PacketsSentPerSec,
 		metrics.PacketsRecvPerSec)
-
-	// 错误和丢包 - 只在实时速率超过阈值时显示
-	if metrics.ErrorsPerSec > 1.0 {  // 每秒错误数 > 1
-		StatusRed.Printf("  错误率: %.2f errors/s [需要检查网络质量]\n", metrics.ErrorsPerSec)
-	}
-	if metrics.DropsPerSec > 1.0 {  // 每秒丢包数 > 1
-		StatusYellow.Printf("  丢包率: %.2f drops/s [可能存在网络拥塞]\n", metrics.DropsPerSec)
-	}
 
 	// 累计流量统计
 	if metrics.TotalBytesSent > 0 || metrics.TotalBytesRecv > 0 {
@@ -413,28 +409,13 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 			FormatBytesUint64(metrics.TotalBytesRecv))
 	}
 
-	// TCP 连接统计
-	if metrics.TCPConnections > 0 {
-		fmt.Printf("  TCP 连接: 总计=%d, 已建立=%d, 监听=%d, TIME_WAIT=%d\n",
-			metrics.TCPConnections,
-			metrics.TCPEstablished,
-			metrics.TCPListening,
-			metrics.TCPTimeWait)
-
-		// TIME_WAIT 连接过多警告
-		if metrics.TCPTimeWait > 1000 {
-			StatusYellow.Printf("  [警告: TIME_WAIT 连接数较多 (%d)，可能需要调整系统参数]\n",
-				metrics.TCPTimeWait)
-		}
-	}
-
-	// 各网卡详细信息
+	// 各网卡详细信息（改进对齐）
 	if len(metrics.Interfaces) > 0 {
 		fmt.Println()
 		fmt.Println("  各网卡详情:")
-		fmt.Printf("  %-15s %15s %15s %12s %12s %8s %8s %8s\n",
+		fmt.Printf("  %-16s %15s %15s %14s %14s %10s %10s %10s\n",
 			"网卡", "发送速率", "接收速率", "发送pkt/s", "接收pkt/s", "错误", "丢包", "状态")
-		fmt.Println("  " + DrawSeparator(105, "-"))
+		fmt.Println("  " + DrawSeparator(110, "-"))
 
 		for _, iface := range metrics.Interfaces {
 			// 跳过回环和没有流量的网卡
@@ -443,17 +424,23 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 				continue
 			}
 
-			ifaceName := TruncateString(iface.Name, 15)
-			fmt.Printf("  %-15s %15s %15s %12.1f %12.1f %8d %8d",
+			ifaceName := TruncateString(iface.Name, 16)
+			
+			// 格式化速率（自动选择单位）
+			sendRate := FormatBytesPerSec(iface.BytesSentPerSec)
+			recvRate := FormatBytesPerSec(iface.BytesRecvPerSec)
+			
+			fmt.Printf("  %-16s %15s %15s %14.1f %14.1f %10d %10d",
 				ifaceName,
-				FormatBytesPerSec(iface.BytesSentPerSec),
-				FormatBytesPerSec(iface.BytesRecvPerSec),
+				sendRate,
+				recvRate,
 				iface.PacketsSentPerSec,
 				iface.PacketsRecvPerSec,
 				iface.ErrorsIn+iface.ErrorsOut,
 				iface.DropsIn+iface.DropsOut)
 
-			// 计算丢包率（相对于总包数）
+			// 判断状态（改进丢包判断）
+			status := "正常"
 			totalPackets := iface.PacketsSent + iface.PacketsRecv
 			totalDrops := iface.DropsIn + iface.DropsOut
 			var dropRate float64
@@ -461,54 +448,33 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 				dropRate = float64(totalDrops) / float64(totalPackets) * 100
 			}
 
-			// 只在丢包率或错误数显著时显示警告
-			status := "正常"
 			if iface.ErrorsIn+iface.ErrorsOut > 100 {
 				status = "有错误"
-				StatusRed.Printf(" %8s", status)
+				StatusRed.Printf(" %10s", status)
 			} else if dropRate > 0.1 { // 丢包率 > 0.1%
 				status = "丢包"
-				StatusYellow.Printf(" %8s", status)
-			} else if totalDrops > 1000 { // 累计丢包 > 1000
-				status = "轻微丢包"
-				InfoColor.Printf(" %8s", status)
+				StatusYellow.Printf(" %10s", status)
+			} else if totalDrops > 1000 { // 累计丢包 > 1000 但丢包率低
+				status = "正常"
+				StatusGreen.Printf(" %10s", status)
 			} else {
-				StatusGreen.Printf(" %8s", status)
+				StatusGreen.Printf(" %10s", status)
 			}
 			fmt.Println()
-
-			// 显示网卡状态（如果可用）
-			if iface.Speed > 0 {
-				fmt.Printf("              状态: %s, 速度: %d Mbps, MTU: %d",
-					func() string {
-						if iface.IsUp {
-							return "UP"
-						}
-						return "DOWN"
-					}(),
-					iface.Speed,
-					iface.MTU)
-				
-				// 显示详细丢包信息
-				if dropRate > 0.01 {
-					fmt.Printf(", 丢包率: %.3f%%", dropRate)
-				}
-				fmt.Println()
-			}
 		}
 	}
 
-	// 网络性能评估
-	totalBandwidth := metrics.BytesSentPerSec + metrics.BytesRecvPerSec
-	totalMbps := totalBandwidth * 8 / 1024 / 1024
-
+	// 网络性能评估（改进带宽显示）
 	fmt.Println()
 	if totalMbps > 800 {
-		StatusRed.Printf("  [网络负载评估: 繁忙 - 总带宽 %.2f Mbps]\n", totalMbps)
+		StatusRed.Printf("  [网络负载评估: 繁忙 - 总带宽 %s (%.2f Mbps = 发送 %.2f + 接收 %.2f)]\n", 
+			FormatBandwidth(totalMbps), totalMbps, sendMbps, recvMbps)
 	} else if totalMbps > 500 {
-		StatusYellow.Printf("  [网络负载评估: 正常偏高 - 总带宽 %.2f Mbps]\n", totalMbps)
+		StatusYellow.Printf("  [网络负载评估: 正常偏高 - 总带宽 %s (%.2f Mbps)]\n",
+			FormatBandwidth(totalMbps), totalMbps)
 	} else {
-		StatusGreen.Printf("  [网络负载评估: 正常 - 总带宽 %.2f Mbps]\n", totalMbps)
+		StatusGreen.Printf("  [网络负载评估: 正常 - 总带宽 %s (%.2f Mbps)]\n",
+			FormatBandwidth(totalMbps), totalMbps)
 	}
 
 	fmt.Println()
@@ -549,19 +515,33 @@ func (t *Terminal) DisplayNodeStats(stats *model.NodeStats, prevData map[string]
 
 		// 文档和存储
 		fmt.Printf("  文档总数: %s, 存储大小: %s\n",
-			ValueColor.Sprint(node.Indices.Docs.Count),
+			ValueColor.Sprint(formatInt64WithCommas(int64(node.Indices.Docs.Count))),
 			ValueColor.Sprint(FormatBytes(node.Indices.Store.SizeInBytes)))
 
-		// 实时速率
+		// 实时速率（添加计算说明）
 		if prev, ok := prevData[nodeID]; ok {
 			elapsed := time.Since(prev.Timestamp).Seconds()
 			if elapsed > 0 {
-				indexRate := float64(node.Indices.Indexing.IndexTotal-prev.IndexTotal) / elapsed
-				queryRate := float64(node.Indices.Search.QueryTotal-prev.QueryTotal) / elapsed
+				// 计算速率：(当前值 - 上次值) / 时间间隔
+				indexDelta := node.Indices.Indexing.IndexTotal - prev.IndexTotal
+				queryDelta := node.Indices.Search.QueryTotal - prev.QueryTotal
+				
+				indexRate := float64(indexDelta) / elapsed
+				queryRate := float64(queryDelta) / elapsed
 
-				fmt.Printf("  写入速率: %s\n", ValueColor.Sprint(FormatRate(indexRate, "docs/s")))
-				fmt.Printf("  查询速率: %s\n", ValueColor.Sprint(FormatRate(queryRate, "queries/s")))
+				fmt.Printf("  写入速率: %s (增量: %d 条 / %.1f 秒)\n", 
+					ValueColor.Sprint(FormatRate(indexRate, "docs/s")),
+					indexDelta, elapsed)
+				fmt.Printf("  查询速率: %s (增量: %d 次 / %.1f 秒)\n", 
+					ValueColor.Sprint(FormatRate(queryRate, "queries/s")),
+					queryDelta, elapsed)
+			} else {
+				fmt.Println("  写入速率: 计算中... (等待下次采集)")
+				fmt.Println("  查询速率: 计算中... (等待下次采集)")
 			}
+		} else {
+			fmt.Println("  写入速率: 初始化中... (首次采集)")
+			fmt.Println("  查询速率: 初始化中... (首次采集)")
 		}
 	}
 
