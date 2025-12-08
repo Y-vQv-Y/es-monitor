@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     ./cmd/monitor
 
 # 运行阶段
-FROM alpine:latest
+FROM alpine:3.19
 
 # 安装运行时依赖
 RUN apk --no-cache add ca-certificates tzdata
