@@ -399,7 +399,7 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 		metrics.PacketsRecvPerSec)
 
 	// 错误和丢包 - 只在实时速率超过阈值时显示
-	hasIssues := false
+	// hasIssues := false
 	if metrics.ErrorsPerSec > 1.0 {  // 每秒错误数 > 1
 		StatusRed.Printf("  错误率: %.2f errors/s [需要检查网络质量]\n", metrics.ErrorsPerSec)
 		hasIssues = true
