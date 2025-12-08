@@ -284,109 +284,256 @@ func (c *SystemCollector) collectDisk() (model.DiskMetrics, error) {
 }
 
 // collectNetwork 采集网络详细指标（只读操作）
-func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
+// helper: 判断是否为虚拟/overlay 网卡（跳过）
+func isVirtualNIC(name string) bool {
+	if name == "lo" {
+		return true
+	}
+	prefixes := []string{
+		"veth", "docker", "br-", "cni", "flannel", "kube-ipvs", "tunl", "virbr",
+		"vlan", "vxlan",
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// helper: 判断是否像物理网卡（ens/eth/bond）
+func isPhysicalNIC(name string) bool {
+	prefixes := []string{"ens", "eth", "eno", "enp", "bond", "bond0", "em"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// 读取 /proc/<pid>/net/dev 的简单解析（返回 map[iface] -> (bytesSent, bytesRecv)）
+// 返回值是粗略估算（和 /proc/net/dev 格式一致）。
+func readProcPIDNetDev(pid int) (map[string]struct{ BytesRecv, BytesSent uint64 }, error) {
+	result := make(map[string]struct{ BytesRecv, BytesSent uint64 })
+	path := fmt.Sprintf("/proc/%d/net/dev", pid)
+	f, err := os.Open(path)
+	if err != nil {
+		return result, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	lineNo := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		lineNo++
+		// 前两行是 header
+		if lineNo <= 2 {
+			continue
+		}
+		// 格式： iface: bytes    packets ... bytes ... 
+		parts := strings.Split(line, ":")
+		if len(parts) < 2 {
+			continue
+		}
+		iface := strings.TrimSpace(parts[0])
+		fields := strings.Fields(strings.TrimSpace(parts[1]))
+		if len(fields) < 10 {
+			continue
+		}
+		recvBytes, _ := strconv.ParseUint(fields[0], 10, 64)
+		sendBytes, _ := strconv.ParseUint(fields[8], 10, 64)
+		result[iface] = struct{ BytesRecv, BytesSent uint64 }{BytesRecv: recvBytes, BytesSent: sendBytes}
+	}
+	if err := scanner.Err(); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// collectNetwork 采集网络详细指标（改进版）
+// 参数 deductSelf: 是否尝试扣除当前进程（或 providedPID）的网络增量（若无法获取会跳过扣除）
+// 参数 providedPID: 若 >0 则用于指定要扣除的进程 PID（否则使用当前进程 PID）
+func (c *SystemCollector) collectNetwork(deductSelf bool, providedPID int) (model.NetworkMetrics, error) {
 	netMetrics := model.NetworkMetrics{}
 	now := time.Now()
 	elapsed := now.Sub(c.prevTime).Seconds()
-
-	// 网络 IO 统计
 	ioCounters, err := net.IOCounters(true)
-	if err == nil && elapsed > 0 && c.initialized {
-		var totalBytesSent, totalBytesRecv float64
-		var totalPacketsSent, totalPacketsRecv float64
-		var totalErrors, totalDrops float64
-		var totalBytesSentAcc, totalBytesRecvAcc uint64
-		var totalPacketsSentAcc, totalPacketsRecvAcc uint64
-		
-		interfaceMetrics := make([]model.InterfaceMetrics, 0)
+	if err != nil {
+		// 更新 prevTime 为当前，避免下一次 elapsed 为很大值
+		c.prevTime = now
+		return netMetrics, err
+	}
 
-		for _, counter := range ioCounters {
-			if prev, ok := c.prevNetIO[counter.Name]; ok {
-				// 计算增量
-				bytesSent := float64(counter.BytesSent - prev.BytesSent)
-				bytesRecv := float64(counter.BytesRecv - prev.BytesRecv)
-				packetsSent := float64(counter.PacketsSent - prev.PacketsSent)
-				packetsRecv := float64(counter.PacketsRecv - prev.PacketsRecv)
-				errors := float64((counter.Errin + counter.Errout) - (prev.Errin + prev.Errout))
-				drops := float64((counter.Dropin + counter.Dropout) - (prev.Dropin + prev.Dropout))
+	// 如果需要扣除自身，先读取采集开始时的进程 net/dev（粗略）
+	var pid int
+	if providedPID > 0 {
+		pid = providedPID
+	} else {
+		pid = os.Getpid()
+	}
 
-				// 计算速率
-				bytesSentPerSec := bytesSent / elapsed
-				bytesRecvPerSec := bytesRecv / elapsed
-				packetsSentPerSec := packetsSent / elapsed
-				packetsRecvPerSec := packetsRecv / elapsed
-				errorsPerSec := errors / elapsed
-				dropsPerSec := drops / elapsed
+	var beforeSelf map[string]struct{ BytesRecv, BytesSent uint64 }
+	var afterSelf map[string]struct{ BytesRecv, BytesSent uint64 }
+	if deductSelf {
+		// read baseline (best-effort)
+		beforeSelf, _ = readProcPIDNetDev(pid)
+	}
 
-				totalBytesSent += bytesSentPerSec
-				totalBytesRecv += bytesRecvPerSec
-				totalPacketsSent += packetsSentPerSec
-				totalPacketsRecv += packetsRecvPerSec
-				totalErrors += errorsPerSec
-				totalDrops += dropsPerSec
+	// 构建临时 map 便于按接口查找 previous counters
+	if c.prevNetIO == nil {
+		c.prevNetIO = make(map[string]net.IOCountersStat)
+	}
 
-				// 每个网卡的详细指标
-				ifaceMetric := model.InterfaceMetrics{
-					Name:              counter.Name,
-					BytesSentPerSec:   bytesSentPerSec,
-					BytesRecvPerSec:   bytesRecvPerSec,
-					PacketsSentPerSec: packetsSentPerSec,
-					PacketsRecvPerSec: packetsRecvPerSec,
-					BytesSent:         counter.BytesSent,
-					BytesRecv:         counter.BytesRecv,
-					PacketsSent:       counter.PacketsSent,
-					PacketsRecv:       counter.PacketsRecv,
-					ErrorsIn:          counter.Errin,
-					ErrorsOut:         counter.Errout,
-					DropsIn:           counter.Dropin,
-					DropsOut:          counter.Dropout,
+	var totalBytesSentPerSec, totalBytesRecvPerSec float64
+	var totalPacketsSentPerSec, totalPacketsRecvPerSec float64
+	var totalErrorsPerSec, totalDropsPerSec float64
+	var totalBytesSentAcc, totalBytesRecvAcc uint64
+	var totalPacketsSentAcc, totalPacketsRecvAcc uint64
+
+	interfaceMetrics := make([]model.InterfaceMetrics, 0)
+
+	// 遍历接口，先计算每个接口增量（但仅把“物理”接口计入 total）
+	for _, counter := range ioCounters {
+		prev, hasPrev := c.prevNetIO[counter.Name]
+		// 计算累计值（始终更新）
+		totalBytesSentAcc += counter.BytesSent
+		totalBytesRecvAcc += counter.BytesRecv
+		totalPacketsSentAcc += counter.PacketsSent
+		totalPacketsRecvAcc += counter.PacketsRecv
+
+		// 计算速率（只有在已初始化并且有 prev 值时）
+		if hasPrev && c.initialized && elapsed > 0 {
+			bytesSent := float64(0)
+			bytesRecv := float64(0)
+			packetsSent := float64(0)
+			packetsRecv := float64(0)
+			errors := float64(0)
+			drops := float64(0)
+
+			if counter.BytesSent >= prev.BytesSent {
+				bytesSent = float64(counter.BytesSent - prev.BytesSent)
+			} else {
+				// 计数器回绕（rare），用当前值处理
+				bytesSent = float64(counter.BytesSent)
+			}
+			if counter.BytesRecv >= prev.BytesRecv {
+				bytesRecv = float64(counter.BytesRecv - prev.BytesRecv)
+			} else {
+				bytesRecv = float64(counter.BytesRecv)
+			}
+			if counter.PacketsSent >= prev.PacketsSent {
+				packetsSent = float64(counter.PacketsSent - prev.PacketsSent)
+			} else {
+				packetsSent = float64(counter.PacketsSent)
+			}
+			if counter.PacketsRecv >= prev.PacketsRecv {
+				packetsRecv = float64(counter.PacketsRecv - prev.PacketsRecv)
+			} else {
+				packetsRecv = float64(counter.PacketsRecv)
+			}
+			errors = float64((counter.Errin + counter.Errout) - (prev.Errin + prev.Errout))
+			drops = float64((counter.Dropin + counter.Dropout) - (prev.Dropin + prev.Dropout))
+
+			bytesSentPerSec := bytesSent / elapsed
+			bytesRecvPerSec := bytesRecv / elapsed
+			packetsSentPerSec := packetsSent / elapsed
+			packetsRecvPerSec := packetsRecv / elapsed
+			errorsPerSec := errors / elapsed
+			dropsPerSec := drops / elapsed
+
+			// 如果是物理网卡则计入 total（避免 overlay/veth 重复计算）
+			if isPhysicalNIC(counter.Name) {
+				totalBytesSentPerSec += bytesSentPerSec
+				totalBytesRecvPerSec += bytesRecvPerSec
+				totalPacketsSentPerSec += packetsSentPerSec
+				totalPacketsRecvPerSec += packetsRecvPerSec
+				totalErrorsPerSec += errorsPerSec
+				totalDropsPerSec += dropsPerSec
+			}
+
+			ifaceMetric := model.InterfaceMetrics{
+				Name:              counter.Name,
+				BytesSentPerSec:   bytesSentPerSec,
+				BytesRecvPerSec:   bytesRecvPerSec,
+				PacketsSentPerSec: packetsSentPerSec,
+				PacketsRecvPerSec: packetsRecvPerSec,
+				BytesSent:         counter.BytesSent,
+				BytesRecv:         counter.BytesRecv,
+				PacketsSent:       counter.PacketsSent,
+				PacketsRecv:       counter.PacketsRecv,
+				ErrorsIn:          counter.Errin,
+				ErrorsOut:         counter.Errout,
+				DropsIn:           counter.Dropin,
+				DropsOut:          counter.Dropout,
+			}
+			interfaceMetrics = append(interfaceMetrics, ifaceMetric)
+		}
+
+		// 更新历史（始终更新，供下一轮使用）
+		c.prevNetIO[counter.Name] = counter
+	}
+
+	// 若开启 deductSelf，在收集结束后读一次 /proc/<pid>/net/dev，计算本进程的接口增量并从 total 中扣除（best-effort）
+	if deductSelf {
+		afterSelf, _ = readProcPIDNetDev(pid)
+		// 计算 delta 并按物理网卡匹配扣除（仅当 beforeSelf/afterSelf 有值时）
+		if beforeSelf != nil && afterSelf != nil {
+			var selfSendDelta, selfRecvDelta uint64
+			for iface, after := range afterSelf {
+				if before, ok := beforeSelf[iface]; ok {
+					// 如果该 iface 被识别为物理网卡（或你希望扣除的 iface），才从 total 扣除
+					if isPhysicalNIC(iface) {
+						// 注意：这些值是累计字节，可能与 net.IOCounters 的单位一致
+						var sendDelta uint64
+						var recvDelta uint64
+						if after.BytesSent >= before.BytesSent {
+							sendDelta = after.BytesSent - before.BytesSent
+						} else {
+							sendDelta = after.BytesSent
+						}
+						if after.BytesRecv >= before.BytesRecv {
+							recvDelta = after.BytesRecv - before.BytesRecv
+						} else {
+							recvDelta = after.BytesRecv
+						}
+						selfSendDelta += sendDelta
+						selfRecvDelta += recvDelta
+					}
 				}
-				
-				interfaceMetrics = append(interfaceMetrics, ifaceMetric)
 			}
-			
-			// 更新历史数据
-			c.prevNetIO[counter.Name] = counter
-			
-			// 累计总量
-			totalBytesSentAcc += counter.BytesSent
-			totalBytesRecvAcc += counter.BytesRecv
-			totalPacketsSentAcc += counter.PacketsSent
-			totalPacketsRecvAcc += counter.PacketsRecv
-		}
-
-		netMetrics.BytesSentPerSec = totalBytesSent
-		netMetrics.BytesRecvPerSec = totalBytesRecv
-		netMetrics.PacketsSentPerSec = totalPacketsSent
-		netMetrics.PacketsRecvPerSec = totalPacketsRecv
-		netMetrics.ErrorsPerSec = totalErrors
-		netMetrics.DropsPerSec = totalDrops
-		netMetrics.TotalBytesSent = totalBytesSentAcc
-		netMetrics.TotalBytesRecv = totalBytesRecvAcc
-		netMetrics.TotalPacketsSent = totalPacketsSentAcc
-		netMetrics.TotalPacketsRecv = totalPacketsRecvAcc
-		netMetrics.Interfaces = interfaceMetrics
-	}
-
-	// 网络连接统计（可选，避免对性能影响）
-	// 注释掉以避免编译错误
-	/*
-	connections, err := net.Connections("tcp")
-	if err == nil {
-		// 统计各种状态的连接数
-		for _, conn := range connections {
-			switch conn.Status {
-			case "ESTABLISHED":
-				netMetrics.TCPEstablished++
-			case "LISTEN":
-				netMetrics.TCPListening++
-			case "TIME_WAIT":
-				netMetrics.TCPTimeWait++
+			// 将进程自身的增量按秒转换为速率并从 total 扣除
+			if elapsed > 0 {
+				totalBytesSentPerSec -= float64(selfSendDelta) / elapsed
+				totalBytesRecvPerSec -= float64(selfRecvDelta) / elapsed
+				// 防止负值
+				if totalBytesSentPerSec < 0 {
+					totalBytesSentPerSec = 0
+				}
+				if totalBytesRecvPerSec < 0 {
+					totalBytesRecvPerSec = 0
+				}
 			}
 		}
-		netMetrics.TCPConnections = len(connections)
 	}
-	*/
+
+	// 填充返回结构
+	netMetrics.BytesSentPerSec = totalBytesSentPerSec
+	netMetrics.BytesRecvPerSec = totalBytesRecvPerSec
+	netMetrics.PacketsSentPerSec = totalPacketsSentPerSec
+	netMetrics.PacketsRecvPerSec = totalPacketsRecvPerSec
+	netMetrics.ErrorsPerSec = totalErrorsPerSec
+	netMetrics.DropsPerSec = totalDropsPerSec
+	netMetrics.TotalBytesSent = totalBytesSentAcc
+	netMetrics.TotalBytesRecv = totalBytesRecvAcc
+	netMetrics.TotalPacketsSent = totalPacketsSentAcc
+	netMetrics.TotalPacketsRecv = totalPacketsRecvAcc
+	netMetrics.Interfaces = interfaceMetrics
+
+	// mark initialized and update prevTime
+	c.initialized = true
+	c.prevTime = now
 
 	return netMetrics, nil
 }
