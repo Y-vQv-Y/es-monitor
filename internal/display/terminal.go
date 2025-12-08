@@ -434,6 +434,8 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 			   strings.HasPrefix(iface.Name, "tunl") ||
 			   strings.HasPrefix(iface.Name, "vlan") ||
 			   strings.HasPrefix(iface.Name, "vxlan") ||
+			   strings.HasPrefix(iface.Name, "virb") ||
+			   strings.HasPrefix(iface.Name, "virbr0-") ||
                strings.HasPrefix(iface.Name, "kube-ipvs") ||
                iface.Name == "lo" {
                  continue
