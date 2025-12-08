@@ -399,14 +399,11 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 		metrics.PacketsRecvPerSec)
 
 	// 错误和丢包 - 只在实时速率超过阈值时显示
-	// hasIssues := false
 	if metrics.ErrorsPerSec > 1.0 {  // 每秒错误数 > 1
 		StatusRed.Printf("  错误率: %.2f errors/s [需要检查网络质量]\n", metrics.ErrorsPerSec)
-		hasIssues = true
 	}
 	if metrics.DropsPerSec > 1.0 {  // 每秒丢包数 > 1
 		StatusYellow.Printf("  丢包率: %.2f drops/s [可能存在网络拥塞]\n", metrics.DropsPerSec)
-		hasIssues = true
 	}
 
 	// 累计流量统计
