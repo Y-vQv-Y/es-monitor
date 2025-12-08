@@ -149,6 +149,16 @@ kubectl apply -f k8s/deployment.yaml
 
   # 自定义刷新间隔（5秒）
   ./es-monitor -host es-host -port 9200 -interval 5
+
+  # docker 运行
+  docker run -d \
+    --name es-monitor \
+    --restart unless-stopped \
+    --network host \
+    --cpus="0.5" \
+    --memory="256m" \
+    yvqvy/es-monitor:master \
+    -host localhost -port 9200 -interval 5
 ```
 ### 监控阈值
 默认告警阈值
