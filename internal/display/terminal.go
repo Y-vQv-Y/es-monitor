@@ -579,9 +579,9 @@ func (t *Terminal) DisplayIndexStats(indices []model.IndexInfo, stats *model.Ind
 		return
 	}
 
-	// 显示表头
-	fmt.Printf("%-30s %-8s %-8s %-12s %-12s\n",
-		"索引名称", "状态", "分片", "文档数", "大小")
+	// 显示表头（固定宽度）
+	fmt.Printf("%-35s %-10s %-12s %-15s %-15s\n",
+		"索引名称", "状态", "分片(主/副)", "文档数", "大小")
 	fmt.Println(DrawSeparator(DisplayWidth, "-"))
 
 	count := 0
@@ -592,14 +592,24 @@ func (t *Terminal) DisplayIndexStats(indices []model.IndexInfo, stats *model.Ind
 		count++
 
 		statusColor := GetStatusColor(idx.Health)
-		indexName := TruncateString(idx.Index, 30)
+		indexName := TruncateString(idx.Index, 35)
+		
+		// 格式化分片信息
+		shardInfo := fmt.Sprintf("%s/%s", idx.Pri, idx.Rep)
+		
+		// 格式化文档数（添加千分位）
+		docCount := formatNumberWithCommas(idx.DocsCount)
+		
+		// 格式化大小（统一转换）
+		size := ParseESSize(idx.StoreSize)
 
-		fmt.Printf("%-30s ", indexName)
-		statusColor.Printf("%-8s ", strings.ToUpper(idx.Health))
-		fmt.Printf("%-8s %-12s %-12s\n",
-			idx.Pri+"/"+idx.Rep,
-			idx.DocsCount,
-			idx.StoreSize)
+		// 左对齐索引名，右对齐数字
+		fmt.Printf("%-35s ", indexName)
+		statusColor.Printf("%-10s ", strings.ToUpper(idx.Health))
+		fmt.Printf("%-12s %15s %15s\n",
+			shardInfo,
+			docCount,
+			size)
 	}
 
 	if len(indices) > 20 {
@@ -607,6 +617,36 @@ func (t *Terminal) DisplayIndexStats(indices []model.IndexInfo, stats *model.Ind
 	}
 
 	fmt.Println()
+}
+
+// formatNumberWithCommas 为数字添加千分位分隔符
+func formatNumberWithCommas(numStr string) string {
+	// 如果是空或 "0"，直接返回
+	if numStr == "" || numStr == "0" {
+		return "0"
+	}
+	
+	// 解析为整数
+	num, err := strconv.ParseInt(numStr, 10, 64)
+	if err != nil {
+		return numStr
+	}
+	
+	// 格式化为千分位
+	return formatInt64WithCommas(num)
+}
+
+// formatInt64WithCommas 为 int64 添加千分位
+func formatInt64WithCommas(n int64) string {
+	if n < 0 {
+		return "-" + formatInt64WithCommas(-n)
+	}
+	
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	
+	return formatInt64WithCommas(n/1000) + "," + fmt.Sprintf("%03d", n%1000)
 }
 
 // DisplayFooter 显示页脚
