@@ -390,9 +390,14 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 		FormatBytesPerSec(metrics.BytesRecvPerSec))
 
 	// 转换为 Mbps 显示
-	sendMbps := metrics.BytesSentPerSec * 8 / 1024 / 1024
-	recvMbps := metrics.BytesRecvPerSec * 8 / 1024 / 1024
-	totalMbps := sendMbps + recvMbps
+	// sendMbps := metrics.BytesSentPerSec * 8 / 1024 / 1024
+	// recvMbps := metrics.BytesRecvPerSec * 8 / 1024 / 1024
+	// totalMbps := sendMbps + recvMbps
+
+	sendMbps := float64(metrics.BytesSentPerSec) * 8.0 / 1024.0 / 1024.0
+    recvMbps := float64(metrics.BytesRecvPerSec) * 8.0 / 1024.0 / 1024.0
+    totalMbps := sendMbps + recvMbps
+	
 	
 	fmt.Printf("              (发送=%s, 接收=%s)\n", 
 		FormatBandwidth(sendMbps),
@@ -420,8 +425,7 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 
 		for _, iface := range metrics.Interfaces {
 			// 跳过回环和没有流量的网卡
-			if iface.Name == "lo" ||
-				(iface.BytesSentPerSec == 0 && iface.BytesRecvPerSec == 0) {
+			if iface.Name == "lo" || (iface.BytesSentPerSec == 0 && iface.BytesRecvPerSec == 0) {
 				continue
 			}
 
