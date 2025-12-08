@@ -104,10 +104,10 @@ func main() {
 }
 
 func parseAddress(addr string) (host, port string) {
-	for i := len(addr) - 1; i >= 0; i-- {
-		if addr[i] == ':' {
-			return addr[:i], addr[i+1:]
-		}
+	// 使用 strings 包
+	idx := strings.LastIndex(addr, ":")
+	if idx == -1 {
+		return addr, ""
 	}
-	return addr, ""
+	return addr[:idx], addr[idx+1:]
 }
