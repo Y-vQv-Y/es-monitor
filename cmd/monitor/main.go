@@ -70,7 +70,7 @@ func main() {
 	// 显示启动信息
 	fmt.Println("===========================================")
 	fmt.Printf("ES Monitor v%s\n", Version)
-	fmt.Println("生产环境安全监控工具 - 只读模式")
+	fmt.Println("生产环境安全监控工具")
 	fmt.Println("===========================================")
 
 	// 创建 ES 客户端
@@ -94,12 +94,20 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// 启动监控
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	go mon.Start(ctx)
 
 	// 等待退出信号
 	<-sigChan
+
+	fmt.Print("\033[H\033[2J")
 	fmt.Println("\n正在安全退出...")
+
+	cancel()
 	mon.Stop()
+	
 	fmt.Println("已安全退出")
 }
 
