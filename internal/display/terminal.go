@@ -426,9 +426,18 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 		for _, iface := range metrics.Interfaces {
 			// 跳过回环和没有流量的网卡
 			// if iface.Name == "lo" || (iface.BytesSentPerSec == 0 && iface.BytesRecvPerSec == 0) {
-			if iface.Name == "lo" {
-				continue
-			}
+			if strings.HasPrefix(iface.Name, "veth") ||
+               strings.HasPrefix(iface.Name, "docker") ||
+               strings.HasPrefix(iface.Name, "br-") ||
+               strings.HasPrefix(iface.Name, "cni") ||
+               strings.HasPrefix(iface.Name, "flannel*") ||
+               strings.HasPrefix(iface.Name, "kube-ipvs") ||
+               iface.Name == "lo" {
+                 continue
+            }
+			// if iface.Name == "lo" {
+			//	   continue
+			// }
 
 			ifaceName := TruncateString(iface.Name, 16)
 			
