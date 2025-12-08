@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/fatih/color"
 	"github.com/Y-vQv-Y/es-monitor/internal/model"
 )
 
