@@ -65,7 +65,7 @@ func (c *EnhancedCollector) analyzeCircuitBreakers(nodeStats *model.NodeStats) m
 func (c *EnhancedCollector) checkHealthIssues(nodeStats *model.NodeStats, metrics *model.EnhancedMetrics) {
 	now := time.Now().Unix()
 	
-	for nodeID, node := range nodeStats.Nodes {
+	for _, node := range nodeStats.Nodes {
 		// 1. JVM 堆内存问题
 		if node.JVM.Mem.HeapUsedPercent >= 85 {
 			metrics.HealthIssues = append(metrics.HealthIssues, model.HealthIssue{
