@@ -1,8 +1,10 @@
 package collector
 
 import (
-	"context"
-	"time"
+    "bufio"
+    "os"
+    "strconv"
+    "strings"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
@@ -11,6 +13,78 @@ import (
 	"github.com/shirou/gopsutil/v3/net"
 	"github.com/Y-vQv-Y/es-monitor/internal/model"
 )
+
+type NetworkCollector struct {
+    // 初始快照
+    initialSnapshot map[string]InterfaceStats
+    // 上一次采集的数据
+    lastSnapshot map[string]InterfaceStats
+    // 监控进程的PID
+    monitorPID int
+}
+
+func NewNetworkCollector() *NetworkCollector {
+    nc := &NetworkCollector{
+        monitorPID: os.Getpid(),
+    }
+    // 初始化时采集基准
+    nc.initialSnapshot = nc.collectRawStats()
+    nc.lastSnapshot = nc.initialSnapshot
+    return nc
+}
+
+func (nc *NetworkCollector) GetNetStats() NetworkStats {
+    current := nc.collectRawStats()
+    
+    // 计算增量(排除初始基准)
+    stats := NetworkStats{}
+    for iface, curr := range current {
+        if initial, ok := nc.initialSnapshot[iface]; ok {
+            stats.TxBytes += (curr.TxBytes - initial.TxBytes)
+            stats.RxBytes += (curr.RxBytes - initial.RxBytes)
+        }
+    }
+    
+    nc.lastSnapshot = current
+    return stats
+}
+
+type TCPStats struct {
+    // TCP连接状态统计
+    Established int
+    SynSent     int
+    SynRecv     int
+    FinWait1    int
+    FinWait2    int
+    TimeWait    int
+    Close       int
+    CloseWait   int
+    LastAck     int
+    Listen      int
+    Closing     int
+    
+    // TCP性能指标
+    RetransSegs uint64  // 重传段数
+    InSegs      uint64  // 接收段数
+    OutSegs     uint64  // 发送段数
+    
+    // 错误统计
+    ListenDrops  uint64  // listen队列溢出
+    TCPLoss      uint64  // 丢包数
+    
+    // 连接详情(可选)
+    Connections []TCPConnection
+}
+
+type TCPConnection struct {
+    LocalAddr  string
+    LocalPort  int
+    RemoteAddr string
+    RemotePort int
+    State      string
+    PID        int
+    Program    string
+}
 
 // SystemCollector 系统指标采集器（完整版，生产环境安全）
 type SystemCollector struct {
@@ -281,6 +355,124 @@ func (c *SystemCollector) collectDisk() (model.DiskMetrics, error) {
 
 	c.prevTime = now
 	return diskMetrics, nil
+}
+
+// 采集TCP统计
+func CollectTCPStats() (*TCPStats, error) {
+    stats := &TCPStats{}
+    
+    // 1. 读取 /proc/net/tcp 和 /proc/net/tcp6
+    if err := parseTCPFile("/proc/net/tcp", stats); err != nil {
+        return nil, err
+    }
+    if err := parseTCPFile("/proc/net/tcp6", stats); err != nil {
+        return nil, err
+    }
+    
+    // 2. 读取 /proc/net/snmp 获取TCP协议统计
+    if err := parseSNMP(stats); err != nil {
+        return nil, err
+    }
+    
+    // 3. 可选:读取 /proc/net/netstat 获取更详细的统计
+    if err := parseNetstat(stats); err != nil {
+        return nil, err
+    }
+    
+    return stats, nil
+}
+
+func parseTCPFile(path string, stats *TCPStats) error {
+    file, err := os.Open(path)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+    
+    scanner := bufio.NewScanner(file)
+    scanner.Scan() // 跳过标题行
+    
+    for scanner.Scan() {
+        fields := strings.Fields(scanner.Text())
+        if len(fields) < 10 {
+            continue
+        }
+        
+        // 字段3是状态(十六进制)
+        stateHex := fields[3]
+        state, _ := strconv.ParseInt(stateHex, 16, 64)
+        
+        switch state {
+        case 0x01:
+            stats.Established++
+        case 0x02:
+            stats.SynSent++
+        case 0x03:
+            stats.SynRecv++
+        case 0x04:
+            stats.FinWait1++
+        case 0x05:
+            stats.FinWait2++
+        case 0x06:
+            stats.TimeWait++
+        case 0x07:
+            stats.Close++
+        case 0x08:
+            stats.CloseWait++
+        case 0x09:
+            stats.LastAck++
+        case 0x0A:
+            stats.Listen++
+        case 0x0B:
+            stats.Closing++
+        }
+        
+        // 如果需要详细连接信息
+        if collectDetails {
+            conn := parseTCPConnection(fields)
+            stats.Connections = append(stats.Connections, conn)
+        }
+    }
+    
+    return scanner.Err()
+}
+
+func parseSNMP(stats *TCPStats) error {
+    file, err := os.Open("/proc/net/snmp")
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+    
+    scanner := bufio.NewScanner(file)
+    var tcpKeys []string
+    
+    for scanner.Scan() {
+        line := scanner.Text()
+        if strings.HasPrefix(line, "Tcp:") {
+            fields := strings.Fields(line)
+            if len(tcpKeys) == 0 {
+                // 第一行是键名
+                tcpKeys = fields[1:]
+            } else {
+                // 第二行是值
+                for i, key := range tcpKeys {
+                    val, _ := strconv.ParseUint(fields[i+1], 10, 64)
+                    switch key {
+                    case "RetransSegs":
+                        stats.RetransSegs = val
+                    case "InSegs":
+                        stats.InSegs = val
+                    case "OutSegs":
+                        stats.OutSegs = val
+                    }
+                }
+                break
+            }
+        }
+    }
+    
+    return scanner.Err()
 }
 
 // collectNetwork 采集网络详细指标（只读操作）
