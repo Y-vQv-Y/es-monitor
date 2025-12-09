@@ -10,9 +10,6 @@ type Config struct {
 	Password string
 	Interval time.Duration
 	ReadOnly bool // 只读模式，生产环境必须为 true
-	EnableTCPStats bool
-	TCPDetailLevel int
-	ExcludeSelfTraffic bool
 }
 
 // Thresholds 阈值配置
@@ -29,14 +26,14 @@ type Thresholds struct {
 
 // DefaultThresholds 默认阈值
 var DefaultThresholds = Thresholds{
-	JVMHeapWarning:  75,
-	JVMHeapCritical: 85,
-	CPUWarning:      60,
-	CPUCritical:     80,
-	MemoryWarning:   80,
-	MemoryCritical:  90,
-	DiskWarning:     80,
-	DiskCritical:    90,
+	JVMHeapWarning:  90,
+	JVMHeapCritical: 95,
+	CPUWarning:      90,
+	CPUCritical:     95,
+	MemoryWarning:   90,
+	MemoryCritical:  95,
+	DiskWarning:     90,
+	DiskCritical:    95,
 }
 
 // SafetyConfig 生产环境安全配置
