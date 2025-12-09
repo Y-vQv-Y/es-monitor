@@ -434,8 +434,6 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 			   strings.HasPrefix(iface.Name, "tunl") ||
 			   strings.HasPrefix(iface.Name, "vlan") ||
 			   strings.HasPrefix(iface.Name, "vxlan") ||
-			   strings.HasPrefix(iface.Name, "virb") ||
-			   strings.HasPrefix(iface.Name, "virbr0-") ||
                strings.HasPrefix(iface.Name, "kube-ipvs") ||
                iface.Name == "lo" {
                  continue
@@ -566,31 +564,6 @@ func (t *Terminal) DisplayNodeStats(stats *model.NodeStats, prevData map[string]
 	}
 
 	fmt.Println()
-}
-
-func (d *Display) ShowTCPStats(stats *TCPStats) {
-    fmt.Println("\n【TCP 连接统计】")
-    fmt.Println(".............................................................................................")
-    fmt.Printf("  连接状态: ESTABLISHED=%d, SYN_SENT=%d, SYN_RECV=%d, FIN_WAIT=%d\n",
-        stats.Established, stats.SynSent, stats.SynRecv, stats.FinWait1+stats.FinWait2)
-    fmt.Printf("            TIME_WAIT=%d, CLOSE_WAIT=%d, LISTEN=%d\n",
-        stats.TimeWait, stats.CloseWait, stats.Listen)
-    fmt.Printf("  TCP 段: 接收=%d, 发送=%d, 重传=%d (%.2f%%)\n",
-        stats.InSegs, stats.OutSegs, stats.RetransSegs,
-        float64(stats.RetransSegs)/float64(stats.OutSegs)*100)
-    
-    // 如果收集了详细连接信息
-    if len(stats.Connections) > 0 {
-        fmt.Println("\n  活跃连接(前10条):")
-        fmt.Println("  本地地址:端口              远程地址:端口              状态           进程")
-        fmt.Println("  --------------------------------------------------------------------------------")
-        for i, conn := range stats.Connections[:min(10, len(stats.Connections))] {
-            fmt.Printf("  %-25s %-25s %-15s %s\n",
-                fmt.Sprintf("%s:%d", conn.LocalAddr, conn.LocalPort),
-                fmt.Sprintf("%s:%d", conn.RemoteAddr, conn.RemotePort),
-                conn.State, conn.Program)
-        }
-    }
 }
 
 // DisplayIndexStats 显示索引统计
