@@ -47,8 +47,6 @@ func NewMonitor(client *client.ElasticsearchClient, cfg *config.Config) *Monitor
 
 // Start 启动监控（生产环境安全）
 func (m *Monitor) Start(ctx context.Context) {
-	m.collector.CollectSystem()
-	time.Sleep(time.Second)
 	m.ticker = time.NewTicker(m.config.Interval)
 	defer m.ticker.Stop()
 
@@ -104,13 +102,7 @@ func (m *Monitor) collect(ctx context.Context) {
 		m.terminal.DisplayDiskMetrics(&sysMetrics.Disk)
 		m.terminal.DisplayNetworkMetrics(&sysMetrics.Network)
 	}
-	
-    tcpStats, err := m.collector.CollectTCP()
-    if err != nil {
-        log.Printf("Failed to collect TCP stats: %v", err)
-    } else {
-        m.display.ShowTCPStats(tcpStats)
-    }
+
 	// 3. 采集节点统计
 	nodeStats, err := m.nodeCollector.Collect(ctx)
 	if err != nil {
