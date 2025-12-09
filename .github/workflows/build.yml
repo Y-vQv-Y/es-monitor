@@ -192,12 +192,8 @@ jobs:
         images: |
           ${{ secrets.DOCKER_USERNAME }}/es-monitor
         tags: |
-          type=ref,event=branch
-          type=ref,event=pr
+          type=raw,value=latest
           type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
-          type=semver,pattern={{major}}
-          type=sha
 
     - name: Build and push
       uses: docker/build-push-action@v5
