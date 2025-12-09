@@ -18,14 +18,6 @@ type SystemCollector struct {
 	prevNetIO   map[string]net.IOCountersStat
 	prevTime    time.Time
 	initialized bool
-	selfNetTracker *SelfNetworkTracker
-}
-
-// SelfNetworkTracker 跟踪监控程序自身的网络流量
-type SelfNetworkTracker struct {
-	totalBytesSent uint64
-	totalBytesRecv uint64
-	mu             sync.Mutex
 }
 
 // NewSystemCollector 创建系统采集器
@@ -35,7 +27,6 @@ func NewSystemCollector() *SystemCollector {
 		prevNetIO:   make(map[string]net.IOCountersStat),
 		prevTime:    time.Now(),
 		initialized: false,
-		selfNetTracker: &SelfNetworkTracker{},
 	}
 }
 
@@ -363,29 +354,6 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 			totalPacketsSentAcc += counter.PacketsSent
 			totalPacketsRecvAcc += counter.PacketsRecv
 		}
-		
-		if c.selfNetTracker != nil {
-			c.selfNetTracker.mu.Lock()
-			selfSent := float64(c.selfNetTracker.totalBytesSent) / elapsed
-			selfRecv := float64(c.selfNetTracker.totalBytesRecv) / elapsed
-			
-			// 从总流量中减去自身流量
-			totalBytesSent = totalBytesSent - selfSent
-			totalBytesRecv = totalBytesRecv - selfRecv
-			
-			// 防止出现负数
-			if totalBytesSent < 0 {
-				totalBytesSent = 0
-			}
-			if totalBytesRecv < 0 {
-				totalBytesRecv = 0
-			}
-			
-			// 重置计数器
-			c.selfNetTracker.totalBytesSent = 0
-			c.selfNetTracker.totalBytesRecv = 0
-			c.selfNetTracker.mu.Unlock()
-		}
 
 		netMetrics.BytesSentPerSec = totalBytesSent
 		netMetrics.BytesRecvPerSec = totalBytesRecv
@@ -421,16 +389,4 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 	*/
 
 	return netMetrics, nil
-}
-
-// SetNetworkTracker 设置网络流量跟踪器（从 client 传入）
-func (c *SystemCollector) SetNetworkTracker(tracker *NetworkTracker) {
-	// 将 client 的流量数据同步到系统采集器
-	if tracker != nil && c.selfNetTracker != nil {
-		sent, recv := tracker.GetAndReset()
-		c.selfNetTracker.mu.Lock()
-		c.selfNetTracker.totalBytesSent += sent
-		c.selfNetTracker.totalBytesRecv += recv
-		c.selfNetTracker.mu.Unlock()
-	}
 }
