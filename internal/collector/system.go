@@ -2,22 +2,26 @@ package collector
 
 import (
 	"context"
+	"os"
+	"strings"
 	"time"
 
+	"github.com/Y-vQv-Y/es-monitor/internal/model"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/load"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/net"
-	"github.com/Y-vQv-Y/es-monitor/internal/model"
+	"github.com/shirou/gopsutil/v3/process"
 )
 
 // SystemCollector 系统指标采集器（完整版，生产环境安全）
 type SystemCollector struct {
-	prevDiskIO  map[string]disk.IOCountersStat
-	prevNetIO   map[string]net.IOCountersStat
-	prevTime    time.Time
-	initialized bool
+	prevDiskIO    map[string]disk.IOCountersStat
+	prevNetIO     map[string]net.IOCountersStat
+	prevProcNetIO net.IOCountersStat // 新增：用于记录本进程上一次的流量数据
+	prevTime      time.Time
+	initialized   bool
 }
 
 // NewSystemCollector 创建系统采集器
@@ -78,7 +82,7 @@ func (c *SystemCollector) collectCPU() (model.CPUMetrics, error) {
 	if err == nil {
 		cpuMetrics.LogicalCores = counts
 	}
-	
+
 	physCounts, err := cpu.Counts(false)
 	if err == nil {
 		cpuMetrics.Cores = physCounts
@@ -101,7 +105,7 @@ func (c *SystemCollector) collectCPU() (model.CPUMetrics, error) {
 	if err == nil && len(times) > 0 {
 		total := times[0].User + times[0].System + times[0].Idle + times[0].Iowait +
 			times[0].Irq + times[0].Softirq + times[0].Steal + times[0].Guest
-		
+
 		if total > 0 {
 			cpuMetrics.UserPercent = times[0].User / total * 100
 			cpuMetrics.SystemPercent = times[0].System / total * 100
@@ -142,15 +146,10 @@ func (c *SystemCollector) collectMemory() (model.MemoryMetrics, error) {
 		memMetrics.Shared = vmStat.Shared
 		memMetrics.Active = vmStat.Active
 		memMetrics.Inactive = vmStat.Inactive
-		
-		// 某些平台可能没有这些字段，使用条件编译或检查
-		// Dirty 和 Writeback 在 Linux 上可用
-		// 其他平台会设置为 0
+
 		if vmStat.Dirty > 0 {
 			memMetrics.Dirty = vmStat.Dirty
 		}
-		// Writeback 字段在某些版本的 gopsutil 中不存在
-		// 我们跳过它或使用反射检查
 		
 		memMetrics.Mapped = vmStat.Mapped
 		memMetrics.Slab = vmStat.Slab
@@ -184,7 +183,7 @@ func (c *SystemCollector) collectDisk() (model.DiskMetrics, error) {
 		var totalReadBytes, totalWriteBytes float64
 		var totalReadOps, totalWriteOps float64
 		var totalReadKB, totalWriteKB uint64
-		
+
 		deviceMetrics := make([]model.DiskDeviceMetrics, 0)
 
 		for name, counter := range ioCounters {
@@ -225,19 +224,19 @@ func (c *SystemCollector) collectDisk() (model.DiskMetrics, error) {
 					WriteOpsPerSec:   writeOpsPerSec,
 					IOUtilPercent:    ioUtilPercent,
 				}
-				
+
 				// 平均请求大小
 				totalOpsNow := readOps + writeOps
 				if totalOpsNow > 0 {
 					deviceMetric.AvgRequestSize = (readBytes + writeBytes) / totalOpsNow
 				}
-				
+
 				deviceMetrics = append(deviceMetrics, deviceMetric)
 			}
-			
+
 			// 更新历史数据
 			c.prevDiskIO[name] = counter
-			
+
 			// 累计总量
 			totalReadKB += counter.ReadBytes / 1024
 			totalWriteKB += counter.WriteBytes / 1024
@@ -283,13 +282,44 @@ func (c *SystemCollector) collectDisk() (model.DiskMetrics, error) {
 	return diskMetrics, nil
 }
 
-// collectNetwork 采集网络详细指标（只读操作）
+// collectNetwork 采集网络详细指标（已修改：过滤自身流量和Loopback干扰）
 func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 	netMetrics := model.NetworkMetrics{}
 	now := time.Now()
 	elapsed := now.Sub(c.prevTime).Seconds()
 
-	// 网络 IO 统计
+	// 1. 获取本进程的网络流量统计（用于后续排除）
+	var procBytesSentPerSec, procBytesRecvPerSec float64
+	
+	// 获取当前 PID
+	pid := int32(os.Getpid())
+	proc, errProc := process.NewProcess(pid)
+	var currentProcIO net.IOCountersStat
+	
+	// 尝试获取进程网络计数（若失败则视为0，不影响整体流程）
+	if errProc == nil {
+		procIOs, err := proc.NetIOCounters(false) // false表示聚合所有网卡
+		if err == nil && len(procIOs) > 0 {
+			currentProcIO = procIOs[0]
+		}
+	}
+
+	// 计算进程自身产生的速率
+	if c.initialized && elapsed > 0 {
+		deltaSent := float64(currentProcIO.BytesSent - c.prevProcNetIO.BytesSent)
+		deltaRecv := float64(currentProcIO.BytesRecv - c.prevProcNetIO.BytesRecv)
+		// 避免负数（计数器重置或异常）
+		if deltaSent < 0 { deltaSent = 0 }
+		if deltaRecv < 0 { deltaRecv = 0 }
+		
+		procBytesSentPerSec = deltaSent / elapsed
+		procBytesRecvPerSec = deltaRecv / elapsed
+	}
+	// 更新进程历史数据
+	c.prevProcNetIO = currentProcIO
+
+
+	// 2. 获取系统全局网络统计
 	ioCounters, err := net.IOCounters(true)
 	if err == nil && elapsed > 0 && c.initialized {
 		var totalBytesSent, totalBytesRecv float64
@@ -297,10 +327,32 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 		var totalErrors, totalDrops float64
 		var totalBytesSentAcc, totalBytesRecvAcc uint64
 		var totalPacketsSentAcc, totalPacketsRecvAcc uint64
-		
+
 		interfaceMetrics := make([]model.InterfaceMetrics, 0)
 
 		for _, counter := range ioCounters {
+			// 【关键修改】过滤 Loopback 接口 (lo)
+			// Elasticsearch 节点间通信或内部调用往往走 loopback，这会导致流量看起来比物理网卡大很多倍。
+			// 如果只想看对外的真实流量，必须过滤 lo。
+			if counter.Name == "lo" {
+				continue
+			}
+			// 可选：如果环境中有虚拟网卡干扰，可在此处继续添加过滤，例如：
+			if strings.HasPrefix(counter.Name, "veth") || 
+               strings.HasPrefix(counter.Name, "calico") ||
+               strings.HasPrefix(counter.Name, "br-") ||
+               strings.HasPrefix(counter.Name, "cni") ||
+               strings.HasPrefix(counter.Name, "flannel") ||
+			   strings.HasPrefix(counter.Name, "tunl") ||
+			   strings.HasPrefix(counter.Name, "vlan") ||
+			   strings.HasPrefix(counter.Name, "vxlan") ||
+			   strings.HasPrefix(counter.Name, "virb") ||
+			   strings.HasPrefix(counter.Name, "virbr0-") ||
+               strings.HasPrefix(counter.Name, "kube-ipvs") ||
+			   strings.HasPrefix(counter.Name, "docker") {
+				continue 
+			}
+
 			if prev, ok := c.prevNetIO[counter.Name]; ok {
 				// 计算增量
 				bytesSent := float64(counter.BytesSent - prev.BytesSent)
@@ -341,13 +393,13 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 					DropsIn:           counter.Dropin,
 					DropsOut:          counter.Dropout,
 				}
-				
+
 				interfaceMetrics = append(interfaceMetrics, ifaceMetric)
 			}
-			
+
 			// 更新历史数据
 			c.prevNetIO[counter.Name] = counter
-			
+
 			// 累计总量
 			totalBytesSentAcc += counter.BytesSent
 			totalBytesRecvAcc += counter.BytesRecv
@@ -355,8 +407,17 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 			totalPacketsRecvAcc += counter.PacketsRecv
 		}
 
-		netMetrics.BytesSentPerSec = totalBytesSent
-		netMetrics.BytesRecvPerSec = totalBytesRecv
+		// 3. 【关键修改】从总速率中减去本程序产生的流量速率
+		realSentRate := totalBytesSent - procBytesSentPerSec
+		realRecvRate := totalBytesRecv - procBytesRecvPerSec
+
+		// 修正可能出现的负值 (当程序流量统计稍有延迟或偏差时)
+		if realSentRate < 0 { realSentRate = 0 }
+		if realRecvRate < 0 { realRecvRate = 0 }
+
+		netMetrics.BytesSentPerSec = realSentRate
+		netMetrics.BytesRecvPerSec = realRecvRate
+		
 		netMetrics.PacketsSentPerSec = totalPacketsSent
 		netMetrics.PacketsRecvPerSec = totalPacketsRecv
 		netMetrics.ErrorsPerSec = totalErrors
@@ -367,26 +428,6 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 		netMetrics.TotalPacketsRecv = totalPacketsRecvAcc
 		netMetrics.Interfaces = interfaceMetrics
 	}
-
-	// 网络连接统计（可选，避免对性能影响）
-	// 注释掉以避免编译错误
-	/*
-	connections, err := net.Connections("tcp")
-	if err == nil {
-		// 统计各种状态的连接数
-		for _, conn := range connections {
-			switch conn.Status {
-			case "ESTABLISHED":
-				netMetrics.TCPEstablished++
-			case "LISTEN":
-				netMetrics.TCPListening++
-			case "TIME_WAIT":
-				netMetrics.TCPTimeWait++
-			}
-		}
-		netMetrics.TCPConnections = len(connections)
-	}
-	*/
 
 	return netMetrics, nil
 }
