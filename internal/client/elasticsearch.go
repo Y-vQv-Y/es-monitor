@@ -12,33 +12,133 @@ import (
 	"github.com/Y-vQv-Y/es-monitor/internal/model"
 )
 
-// ElasticsearchClient ES 客户端（生产环境安全版本）
+// ElasticsearchClient 添加流量计数器
 type ElasticsearchClient struct {
-	baseURL string
-	client  *http.Client
-	config  *config.Config
-	safety  *config.SafetyConfig
+	baseURL      string
+	client       *http.Client
+	config       *config.Config
+	safety       *config.SafetyConfig
+	netTracker   *NetworkTracker // 新增
 }
+
+// NetworkTracker 网络流量跟踪器
+type NetworkTracker struct {
+	BytesSent uint64
+	BytesRecv uint64
+	mu        sync.Mutex
+}
+
+// trackingTransport 包装 http.Transport 以跟踪流量
+type trackingTransport struct {
+	base    http.RoundTripper
+	tracker *NetworkTracker
+}
+
+func (t *trackingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// 记录发送的字节数（估算）
+	if req.Body != nil {
+		if req.ContentLength > 0 {
+			t.tracker.addBytesSent(uint64(req.ContentLength))
+		}
+	}
+	// 请求头大小（粗略估算）
+	headerSize := uint64(len(req.Method) + len(req.URL.String()) + 100)
+	t.tracker.addBytesSent(headerSize)
+
+	// 执行请求
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+
+	// 记录接收的字节数
+	if resp.ContentLength > 0 {
+		t.tracker.addBytesRecv(uint64(resp.ContentLength))
+	} else {
+		// 如果没有 ContentLength，读取 body 并计数
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body = io.NopCloser(bytes.NewBuffer(body))
+		t.tracker.addBytesRecv(uint64(len(body)))
+	}
+	// 响应头大小（粗略估算）
+	t.tracker.addBytesRecv(200)
+
+	return resp, nil
+}
+
 
 // NewElasticsearchClient 创建 ES 客户端
 func NewElasticsearchClient(cfg *config.Config) *ElasticsearchClient {
-	baseURL := fmt.Sprintf("http://%s:%s", cfg.Host, cfg.Port)
-	
-	// 使用安全的 HTTP 客户端配置
-	return &ElasticsearchClient{
+	client := &ElasticsearchClient{
 		baseURL: baseURL,
 		client: &http.Client{
 			Timeout: config.DefaultSafetyConfig.RequestTimeout,
-			Transport: &http.Transport{
-				MaxIdleConns:        10,
-				MaxIdleConnsPerHost: 5,
-				IdleConnTimeout:     30 * time.Second,
-				DisableKeepAlives:   false, // 保持连接复用，减少对服务器压力
+			Transport: &trackingTransport{
+				base:    http.DefaultTransport,
+				tracker: &NetworkTracker{}, // 新增追踪器
 			},
 		},
-		config: cfg,
-		safety: &config.DefaultSafetyConfig,
+		config:     cfg,
+		safety:     &config.DefaultSafetyConfig,
+		netTracker: &NetworkTracker{}, // 新增
 	}
+	
+	return client
+}
+
+func (t *trackingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// 记录发送的字节数（估算）
+	if req.Body != nil {
+		if req.ContentLength > 0 {
+			t.tracker.addBytesSent(uint64(req.ContentLength))
+		}
+	}
+	// 请求头大小（粗略估算）
+	headerSize := uint64(len(req.Method) + len(req.URL.String()) + 100)
+	t.tracker.addBytesSent(headerSize)
+
+	// 执行请求
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+
+	// 记录接收的字节数
+	if resp.ContentLength > 0 {
+		t.tracker.addBytesRecv(uint64(resp.ContentLength))
+	} else {
+		// 如果没有 ContentLength，读取 body 并计数
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body = io.NopCloser(bytes.NewBuffer(body))
+		t.tracker.addBytesRecv(uint64(len(body)))
+	}
+	// 响应头大小（粗略估算）
+	t.tracker.addBytesRecv(200)
+
+	return resp, nil
+}
+
+// addBytesSent 添加发送字节数
+func (n *NetworkTracker) addBytesSent(bytes uint64) {
+	n.mu.Lock()
+	n.BytesSent += bytes
+	n.mu.Unlock()
+}
+
+// addBytesRecv 添加接收字节数
+func (n *NetworkTracker) addBytesRecv(bytes uint64) {
+	n.mu.Lock()
+	n.BytesRecv += bytes
+	n.mu.Unlock()
+}
+
+// GetAndReset 获取并重置计数器
+func (n *NetworkTracker) GetAndReset() (sent, recv uint64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	sent, recv = n.BytesSent, n.BytesRecv
+	n.BytesSent, n.BytesRecv = 0, 0
+	return
 }
 
 // isEndpointAllowed 检查端点是否允许访问（生产环境安全检查）
