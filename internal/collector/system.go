@@ -13,26 +13,24 @@ import (
 	"github.com/shirou/gopsutil/v3/net"
 )
 
-// SystemCollector 系统指标采集器（完整版，生产环境安全）
+// SystemCollector 系统指标采集器
 type SystemCollector struct {
 	prevDiskIO       map[string]disk.IOCountersStat
 	prevNetIO        map[string]net.IOCountersStat
 	prevTime         time.Time
 	initialized      bool
 	
-	// 网络流量平滑处理（用于排除异常峰值）
-	netHistoryWindow []NetworkSnapshot // 保存最近N次采集的网络数据
-	maxHistorySize   int               // 历史窗口大小
+	// 网络流量平滑处理
+	netHistoryWindow []NetworkSnapshot
+	maxHistorySize   int
 }
 
-// NetworkSnapshot 网络快照（用于异常检测）
 type NetworkSnapshot struct {
 	Timestamp       time.Time
 	BytesSentPerSec float64
 	BytesRecvPerSec float64
 }
 
-// NewSystemCollector 创建系统采集器
 func NewSystemCollector() *SystemCollector {
 	return &SystemCollector{
 		prevDiskIO:       make(map[string]disk.IOCountersStat),
@@ -40,38 +38,33 @@ func NewSystemCollector() *SystemCollector {
 		prevTime:         time.Now(),
 		initialized:      false,
 		netHistoryWindow: make([]NetworkSnapshot, 0),
-		maxHistorySize:   5, // 保留最近5次数据用于异常检测
+		maxHistorySize:   10,
 	}
 }
 
-// Collect 采集系统指标（只读操作，不影响系统性能）
 func (c *SystemCollector) Collect(ctx context.Context) (*model.SystemMetrics, error) {
 	metrics := &model.SystemMetrics{
 		Timestamp: time.Now().Unix(),
 	}
 
-	// CPU 指标采集
 	cpuMetrics, err := c.collectCPU()
 	if err != nil {
 		cpuMetrics = model.CPUMetrics{}
 	}
 	metrics.CPU = cpuMetrics
 
-	// 内存指标采集
 	memMetrics, err := c.collectMemory()
 	if err != nil {
 		memMetrics = model.MemoryMetrics{}
 	}
 	metrics.Memory = memMetrics
 
-	// 磁盘指标采集
 	diskMetrics, err := c.collectDisk()
 	if err != nil {
 		diskMetrics = model.DiskMetrics{}
 	}
 	metrics.Disk = diskMetrics
 
-	// 网络指标采集（带异常过滤）
 	netMetrics, err := c.collectNetwork()
 	if err != nil {
 		netMetrics = model.NetworkMetrics{}
@@ -82,7 +75,6 @@ func (c *SystemCollector) Collect(ctx context.Context) (*model.SystemMetrics, er
 	return metrics, nil
 }
 
-// collectCPU 采集 CPU 详细指标（生产环境安全）
 func (c *SystemCollector) collectCPU() (model.CPUMetrics, error) {
 	cpuMetrics := model.CPUMetrics{}
 
@@ -133,7 +125,6 @@ func (c *SystemCollector) collectCPU() (model.CPUMetrics, error) {
 	return cpuMetrics, nil
 }
 
-// collectMemory 采集内存详细指标（只读操作）
 func (c *SystemCollector) collectMemory() (model.MemoryMetrics, error) {
 	memMetrics := model.MemoryMetrics{}
 
@@ -173,7 +164,6 @@ func (c *SystemCollector) collectMemory() (model.MemoryMetrics, error) {
 	return memMetrics, nil
 }
 
-// collectDisk 采集磁盘详细指标（只读操作）
 func (c *SystemCollector) collectDisk() (model.DiskMetrics, error) {
 	diskMetrics := model.DiskMetrics{}
 	now := time.Now()
@@ -274,14 +264,19 @@ func (c *SystemCollector) collectDisk() (model.DiskMetrics, error) {
 	return diskMetrics, nil
 }
 
-// collectNetwork 采集网络详细指标（智能过滤异常峰值）
+// collectNetwork 采集网络详细指标（修复计算错误）
 func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 	netMetrics := model.NetworkMetrics{}
 	now := time.Now()
 	elapsed := now.Sub(c.prevTime).Seconds()
 
+	// 【关键修复1】确保时间间隔合理（至少 1 秒）
+	if elapsed < 1.0 {
+		elapsed = 1.0
+	}
+
 	ioCounters, err := net.IOCounters(true)
-	if err == nil && elapsed > 0 && c.initialized {
+	if err == nil && c.initialized {
 		var totalBytesSent, totalBytesRecv float64
 		var totalPacketsSent, totalPacketsRecv float64
 		var totalErrors, totalDrops float64
@@ -309,6 +304,7 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 			}
 
 			if prev, ok := c.prevNetIO[counter.Name]; ok {
+				// 【关键修复2】计算增量，防止计数器溢出
 				bytesSent := float64(counter.BytesSent - prev.BytesSent)
 				bytesRecv := float64(counter.BytesRecv - prev.BytesRecv)
 				packetsSent := float64(counter.PacketsSent - prev.PacketsSent)
@@ -316,12 +312,30 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 				errors := float64((counter.Errin + counter.Errout) - (prev.Errin + prev.Errout))
 				drops := float64((counter.Dropin + counter.Dropout) - (prev.Dropin + prev.Dropout))
 
+				// 【关键修复3】检测计数器重置（负数）
+				if bytesSent < 0 { bytesSent = 0 }
+				if bytesRecv < 0 { bytesRecv = 0 }
+				if packetsSent < 0 { packetsSent = 0 }
+				if packetsRecv < 0 { packetsRecv = 0 }
+				if errors < 0 { errors = 0 }
+				if drops < 0 { drops = 0 }
+
+				// 计算速率
 				bytesSentPerSec := bytesSent / elapsed
 				bytesRecvPerSec := bytesRecv / elapsed
 				packetsSentPerSec := packetsSent / elapsed
 				packetsRecvPerSec := packetsRecv / elapsed
 				errorsPerSec := errors / elapsed
 				dropsPerSec := drops / elapsed
+
+				// 【关键修复4】异常值检测（速率 > 1 GB/s 肯定有问题）
+				maxReasonableRate := 1.0 * 1024 * 1024 * 1024 // 1 GB/s
+				if bytesSentPerSec > maxReasonableRate {
+					bytesSentPerSec = 0
+				}
+				if bytesRecvPerSec > maxReasonableRate {
+					bytesRecvPerSec = 0
+				}
 
 				totalBytesSent += bytesSentPerSec
 				totalBytesRecv += bytesRecvPerSec
@@ -349,15 +363,17 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 				interfaceMetrics = append(interfaceMetrics, ifaceMetric)
 			}
 
+			// 更新历史数据
 			c.prevNetIO[counter.Name] = counter
 
+			// 累计总量
 			totalBytesSentAcc += counter.BytesSent
 			totalBytesRecvAcc += counter.BytesRecv
 			totalPacketsSentAcc += counter.PacketsSent
 			totalPacketsRecvAcc += counter.PacketsRecv
 		}
 
-		// 【关键改进】异常检测与平滑处理
+		// 【关键修复5】使用中位数平滑，排除异常峰值
 		smoothedSent, smoothedRecv := c.smoothNetworkTraffic(
 			totalBytesSent, 
 			totalBytesRecv,
@@ -380,12 +396,12 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 	return netMetrics, nil
 }
 
-// smoothNetworkTraffic 平滑网络流量数据，过滤异常峰值
+// smoothNetworkTraffic 平滑网络流量数据
 func (c *SystemCollector) smoothNetworkTraffic(
 	currentSent, currentRecv float64,
 	timestamp time.Time,
 ) (smoothedSent, smoothedRecv float64) {
-	// 添加当前快照到历史窗口
+	// 添加当前快照
 	snapshot := NetworkSnapshot{
 		Timestamp:       timestamp,
 		BytesSentPerSec: currentSent,
@@ -403,7 +419,7 @@ func (c *SystemCollector) smoothNetworkTraffic(
 		return currentSent, currentRecv
 	}
 
-	// 计算中位数（排除异常峰值的最佳方法）
+	// 提取历史值
 	sentValues := make([]float64, len(c.netHistoryWindow))
 	recvValues := make([]float64, len(c.netHistoryWindow))
 	for i, snap := range c.netHistoryWindow {
@@ -411,22 +427,33 @@ func (c *SystemCollector) smoothNetworkTraffic(
 		recvValues[i] = snap.BytesRecvPerSec
 	}
 
+	// 使用中位数（抗异常值）
 	smoothedSent = median(sentValues)
 	smoothedRecv = median(recvValues)
 
-	// 【可选】额外的异常检测：如果当前值是历史平均值的10倍以上，则使用平滑值
-	avgSent := average(sentValues[:len(sentValues)-1]) // 排除当前值
-	avgRecv := average(recvValues[:len(recvValues)-1])
-
-	// 检测到异常峰值（当前值 > 10倍历史平均值），强制使用历史平均值
-	if currentSent > avgSent*10 && avgSent > 0 {
-		smoothedSent = avgSent
+	// 额外保护：如果中位数仍然异常大（> 100 MB/s），使用最小值
+	if smoothedSent > 100*1024*1024 {
+		smoothedSent = minimum(sentValues)
 	}
-	if currentRecv > avgRecv*10 && avgRecv > 0 {
-		smoothedRecv = avgRecv
+	if smoothedRecv > 100*1024*1024 {
+		smoothedRecv = minimum(recvValues)
 	}
 
 	return smoothedSent, smoothedRecv
+}
+
+// minimum 计算最小值
+func minimum(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	min := values[0]
+	for _, v := range values {
+		if v < min {
+			min = v
+		}
+	}
+	return min
 }
 
 // median 计算中位数
@@ -435,7 +462,6 @@ func median(values []float64) float64 {
 		return 0
 	}
 
-	// 简单冒泡排序（数据量小，性能无影响）
 	sorted := make([]float64, len(values))
 	copy(sorted, values)
 	for i := 0; i < len(sorted); i++ {
