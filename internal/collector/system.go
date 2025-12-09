@@ -2,7 +2,6 @@ package collector
 
 import (
 	"context"
-	"os"
 	"strings"
 	"time"
 
@@ -12,16 +11,14 @@ import (
 	"github.com/shirou/gopsutil/v3/load"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/net"
-	"github.com/shirou/gopsutil/v3/process"
 )
 
 // SystemCollector 系统指标采集器（完整版，生产环境安全）
 type SystemCollector struct {
-	prevDiskIO    map[string]disk.IOCountersStat
-	prevNetIO     map[string]net.IOCountersStat
-	prevProcNetIO net.IOCountersStat // 新增：用于记录本进程上一次的流量数据
-	prevTime      time.Time
-	initialized   bool
+	prevDiskIO  map[string]disk.IOCountersStat
+	prevNetIO   map[string]net.IOCountersStat
+	prevTime    time.Time
+	initialized bool
 }
 
 // NewSystemCollector 创建系统采集器
@@ -282,44 +279,13 @@ func (c *SystemCollector) collectDisk() (model.DiskMetrics, error) {
 	return diskMetrics, nil
 }
 
-// collectNetwork 采集网络详细指标（已修改：过滤自身流量和Loopback干扰）
+// collectNetwork 采集网络详细指标（过滤Loopback和虚拟网卡）
 func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 	netMetrics := model.NetworkMetrics{}
 	now := time.Now()
 	elapsed := now.Sub(c.prevTime).Seconds()
 
-	// 1. 获取本进程的网络流量统计（用于后续排除）
-	var procBytesSentPerSec, procBytesRecvPerSec float64
-	
-	// 获取当前 PID
-	pid := int32(os.Getpid())
-	proc, errProc := process.NewProcess(pid)
-	var currentProcIO net.IOCountersStat
-	
-	// 尝试获取进程网络计数（若失败则视为0，不影响整体流程）
-	if errProc == nil {
-		procIOs, err := proc.NetIOCounters(false) // false表示聚合所有网卡
-		if err == nil && len(procIOs) > 0 {
-			currentProcIO = procIOs[0]
-		}
-	}
-
-	// 计算进程自身产生的速率
-	if c.initialized && elapsed > 0 {
-		deltaSent := float64(currentProcIO.BytesSent - c.prevProcNetIO.BytesSent)
-		deltaRecv := float64(currentProcIO.BytesRecv - c.prevProcNetIO.BytesRecv)
-		// 避免负数（计数器重置或异常）
-		if deltaSent < 0 { deltaSent = 0 }
-		if deltaRecv < 0 { deltaRecv = 0 }
-		
-		procBytesSentPerSec = deltaSent / elapsed
-		procBytesRecvPerSec = deltaRecv / elapsed
-	}
-	// 更新进程历史数据
-	c.prevProcNetIO = currentProcIO
-
-
-	// 2. 获取系统全局网络统计
+	// 获取系统全局网络统计
 	ioCounters, err := net.IOCounters(true)
 	if err == nil && elapsed > 0 && c.initialized {
 		var totalBytesSent, totalBytesRecv float64
@@ -331,24 +297,23 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 		interfaceMetrics := make([]model.InterfaceMetrics, 0)
 
 		for _, counter := range ioCounters {
-			// 【关键修改】过滤 Loopback 接口 (lo)
-			// Elasticsearch 节点间通信或内部调用往往走 loopback，这会导致流量看起来比物理网卡大很多倍。
-			// 如果只想看对外的真实流量，必须过滤 lo。
+			// 过滤 Loopback 接口
 			if counter.Name == "lo" {
 				continue
 			}
-			// 可选：如果环境中有虚拟网卡干扰，可在此处继续添加过滤，例如：
+			
+			// 过滤虚拟网卡和容器网络接口
 			if strings.HasPrefix(counter.Name, "veth") || 
-               strings.HasPrefix(counter.Name, "calico") ||
-               strings.HasPrefix(counter.Name, "br-") ||
-               strings.HasPrefix(counter.Name, "cni") ||
-               strings.HasPrefix(counter.Name, "flannel") ||
+			   strings.HasPrefix(counter.Name, "calico") ||
+			   strings.HasPrefix(counter.Name, "br-") ||
+			   strings.HasPrefix(counter.Name, "cni") ||
+			   strings.HasPrefix(counter.Name, "flannel") ||
 			   strings.HasPrefix(counter.Name, "tunl") ||
 			   strings.HasPrefix(counter.Name, "vlan") ||
 			   strings.HasPrefix(counter.Name, "vxlan") ||
 			   strings.HasPrefix(counter.Name, "virb") ||
 			   strings.HasPrefix(counter.Name, "virbr0-") ||
-               strings.HasPrefix(counter.Name, "kube-ipvs") ||
+			   strings.HasPrefix(counter.Name, "kube-ipvs") ||
 			   strings.HasPrefix(counter.Name, "docker") {
 				continue 
 			}
@@ -407,17 +372,8 @@ func (c *SystemCollector) collectNetwork() (model.NetworkMetrics, error) {
 			totalPacketsRecvAcc += counter.PacketsRecv
 		}
 
-		// 3. 【关键修改】从总速率中减去本程序产生的流量速率
-		realSentRate := totalBytesSent - procBytesSentPerSec
-		realRecvRate := totalBytesRecv - procBytesRecvPerSec
-
-		// 修正可能出现的负值 (当程序流量统计稍有延迟或偏差时)
-		if realSentRate < 0 { realSentRate = 0 }
-		if realRecvRate < 0 { realRecvRate = 0 }
-
-		netMetrics.BytesSentPerSec = realSentRate
-		netMetrics.BytesRecvPerSec = realRecvRate
-		
+		netMetrics.BytesSentPerSec = totalBytesSent
+		netMetrics.BytesRecvPerSec = totalBytesRecv
 		netMetrics.PacketsSentPerSec = totalPacketsSent
 		netMetrics.PacketsRecvPerSec = totalPacketsRecv
 		netMetrics.ErrorsPerSec = totalErrors
