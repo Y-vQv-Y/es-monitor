@@ -79,6 +79,9 @@ func (m *Monitor) collect(ctx context.Context) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.systemCollector != nil && m.client.netTracker != nil {
+	   m.systemCollector.SetNetworkTracker(m.client.netTracker)
+	}
 
 	// 显示标题
 	m.terminal.DisplayHeader()
