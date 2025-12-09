@@ -10,6 +10,9 @@ type Config struct {
 	Password string
 	Interval time.Duration
 	ReadOnly bool // 只读模式，生产环境必须为 true
+	EnableTCPStats bool
+	TCPDetailLevel int
+	ExcludeSelfTraffic bool
 }
 
 // Thresholds 阈值配置
