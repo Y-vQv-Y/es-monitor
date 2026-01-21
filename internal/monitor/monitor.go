@@ -83,6 +83,20 @@ func (m *Monitor) collect(ctx context.Context) {
 	// 显示标题
 	m.terminal.DisplayHeader()
 
+	// ========================================
+	// 【改动1】第一步：先采集系统指标（此时无网络请求，流量统计准确）
+	// ========================================
+	sysMetrics, sysErr := m.systemCollector.Collect(ctx)
+
+	// ========================================
+	// 【改动2】延迟 1.5 秒，避免后续 ES 请求影响本次网络流量统计
+	// ========================================
+	time.Sleep(1500 * time.Millisecond)
+
+	// ========================================
+	// 【改动3】第二步：再采集 ES 指标（会产生大量 HTTP 流量）
+	// ========================================
+
 	// 1. 采集集群健康状态
 	health, err := m.clusterCollector.Collect(ctx)
 	if err != nil {
@@ -92,10 +106,9 @@ func (m *Monitor) collect(ctx context.Context) {
 	}
 	m.terminal.DisplayClusterHealth(health)
 
-	// 2. 采集系统指标（优先显示，最关心的指标）
-	sysMetrics, err := m.systemCollector.Collect(ctx)
-	if err != nil {
-		m.terminal.DisplayError("获取系统指标失败", err)
+	// 2. 显示系统指标（优先显示，最关心的指标）
+	if sysErr != nil {
+		m.terminal.DisplayError("获取系统指标失败", sysErr)
 	} else {
 		// 显示完整的系统资源监控
 		m.terminal.DisplaySystemMetrics(sysMetrics)
