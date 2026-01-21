@@ -5,9 +5,6 @@ import (
 	"strings"
 	"time"
 	"strconv"
-	"os"
-	"os/exec"
-	"runtime"
 
 	"github.com/Y-vQv-Y/es-monitor/internal/config"
 	"github.com/Y-vQv-Y/es-monitor/internal/model"
@@ -20,93 +17,23 @@ const (
 // Terminal 终端显示
 type Terminal struct {
 	thresholds config.Thresholds
-	lastLines  int // 记录上次输出的行数
 }
 
 // NewTerminal 创建终端显示器
 func NewTerminal() *Terminal {
 	return &Terminal{
 		thresholds: config.DefaultThresholds,
-		lastLines:  0,
 	}
 }
 
-// Clear 清屏 - 完全清空屏幕并移动光标到左上角
-func (t *Terminal) Clear() {
-	fmt.Print("\033[2J\033[H")
-}
+// Clear 清屏
+//func (t *Terminal) Clear() {
+//	fmt.Print("\033[H\033[2J")
+//}
 
-// ClearAndReset 清空并重置光标到开始位置（类似top的刷新方式）
-func (t *Terminal) ClearAndReset() {
-	// 移动光标到屏幕左上角
-	fmt.Print("\033[H")
-	// 清除从光标到屏幕末尾的所有内容
-	fmt.Print("\033[J")
-}
-
-// GetTerminalSize 获取终端尺寸
-func (t *Terminal) GetTerminalSize() (width, height int) {
-	width, height = 120, 40 // 默认值
-	
-	if runtime.GOOS == "windows" {
-		// Windows 使用 mode con 命令
-		cmd := exec.Command("cmd", "/c", "mode", "con")
-		output, err := cmd.Output()
-		if err == nil {
-			lines := strings.Split(string(output), "\n")
-			for _, line := range lines {
-				if strings.Contains(line, "Lines:") || strings.Contains(line, "行:") {
-					fields := strings.Fields(line)
-					if len(fields) >= 2 {
-						if h, err := strconv.Atoi(fields[len(fields)-1]); err == nil {
-							height = h
-						}
-					}
-				}
-				if strings.Contains(line, "Columns:") || strings.Contains(line, "列:") {
-					fields := strings.Fields(line)
-					if len(fields) >= 2 {
-						if w, err := strconv.Atoi(fields[len(fields)-1]); err == nil {
-							width = w
-						}
-					}
-				}
-			}
-		}
-	} else {
-		// Unix-like 系统使用 stty size
-		cmd := exec.Command("stty", "size")
-		cmd.Stdin = os.Stdin
-		output, err := cmd.Output()
-		if err == nil {
-			fields := strings.Fields(string(output))
-			if len(fields) == 2 {
-				if h, err := strconv.Atoi(fields[0]); err == nil {
-					height = h
-				}
-				if w, err := strconv.Atoi(fields[1]); err == nil {
-					width = w
-				}
-			}
-		}
-	}
-	
-	return width, height
-}
-
-// DisplayHeader 显示标题（包含清屏）
+// DisplayHeader 显示标题
 func (t *Terminal) DisplayHeader() {
-	t.ClearAndReset() // 使用新的清屏方式
-	t.displayHeaderContent()
-}
-
-// DisplayHeaderWithoutClear 显示标题（不清屏）- 用于主循环已经清屏的情况
-func (t *Terminal) DisplayHeaderWithoutClear() {
-	t.displayHeaderContent()
-}
-
-// displayHeaderContent 标题内容（内部方法）
-func (t *Terminal) displayHeaderContent() {
+	t.Clear()
 	TitleColor.Println(DrawSeparator(DisplayWidth, "="))
 	TitleColor.Println(PadRight("  Elasticsearch 生产环境监控工具 (只读安全模式)", DisplayWidth))
 	TitleColor.Println(DrawSeparator(DisplayWidth, "="))
@@ -463,10 +390,9 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 		FormatBytesPerSec(metrics.BytesRecvPerSec))
 
 	// 转换为 Mbps 显示
-	sendMbps := float64(metrics.BytesSentPerSec) * 8.0 / 1024.0 / 1024.0
-    recvMbps := float64(metrics.BytesRecvPerSec) * 8.0 / 1024.0 / 1024.0
-    totalMbps := sendMbps + recvMbps
-	
+	sendMbps := metrics.BytesSentPerSec * 8 / 1024 / 1024
+	recvMbps := metrics.BytesRecvPerSec * 8 / 1024 / 1024
+	totalMbps := sendMbps + recvMbps
 	
 	fmt.Printf("              (发送=%s, 接收=%s)\n", 
 		FormatBandwidth(sendMbps),
@@ -494,21 +420,10 @@ func (t *Terminal) DisplayNetworkMetrics(metrics *model.NetworkMetrics) {
 
 		for _, iface := range metrics.Interfaces {
 			// 跳过回环和没有流量的网卡
-			if strings.HasPrefix(iface.Name, "veth") ||
-               strings.HasPrefix(iface.Name, "docker") ||
-               strings.HasPrefix(iface.Name, "br-") ||
-               strings.HasPrefix(iface.Name, "cni") ||
-               strings.HasPrefix(iface.Name, "flannel") ||
-			   strings.HasPrefix(iface.Name, "tunl") ||
-			   strings.HasPrefix(iface.Name, "vlan") ||
-			   strings.HasPrefix(iface.Name, "vxlan") ||
-			   strings.HasPrefix(iface.Name, "virb") ||
-			   strings.HasPrefix(iface.Name, "virbr0-") ||
-			   strings.HasPrefix(iface.Name, "calico") ||
-               strings.HasPrefix(iface.Name, "kube-ipvs") ||
-               iface.Name == "lo" {
-                 continue
-            }
+			if iface.Name == "lo" ||
+				(iface.BytesSentPerSec == 0 && iface.BytesRecvPerSec == 0) {
+				continue
+			}
 
 			ifaceName := TruncateString(iface.Name, 16)
 			
@@ -718,7 +633,7 @@ func formatInt64WithCommas(n int64) string {
 // DisplayFooter 显示页脚
 func (t *Terminal) DisplayFooter() {
 	fmt.Println(DrawSeparator(DisplayWidth, "="))
-	fmt.Printf("最后更新: %s | 只读安全模式 | 按 Ctrl+C 安全退出 | 刷新间隔: 5秒\n",
+	fmt.Printf("最后更新: %s | 只读安全模式 | 按 Ctrl+C 安全退出\n",
 		time.Now().Format("2006-01-02 15:04:05"))
 }
 
