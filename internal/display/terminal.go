@@ -27,9 +27,9 @@ func NewTerminal() *Terminal {
 }
 
 // Clear 清屏
-//func (t *Terminal) Clear() {
-//	fmt.Print("\033[H\033[2J")
-//}
+func (t *Terminal) Clear() {
+	fmt.Print("\033[H\033[2J")
+}
 
 // DisplayHeader 显示标题
 func (t *Terminal) DisplayHeader() {
