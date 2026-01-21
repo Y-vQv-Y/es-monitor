@@ -182,7 +182,7 @@ CPU 使用率
 
 
 ### 项目结构
-
+```text
 es-monitor/
 ├── cmd/monitor/          # 程序入口
 ├── internal/
@@ -198,7 +198,7 @@ es-monitor/
 ├── Dockerfile           # Docker 配置
 ├── docker-compose.yml   # Docker Compose 配置
 └── README.md            # 项目文档
-
+```
 
 ### 扩展开发
 添加新的采集器
