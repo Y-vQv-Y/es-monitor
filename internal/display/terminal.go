@@ -94,9 +94,19 @@ func (t *Terminal) GetTerminalSize() (width, height int) {
 	return width, height
 }
 
-// DisplayHeader 显示标题
+// DisplayHeader 显示标题（包含清屏）
 func (t *Terminal) DisplayHeader() {
 	t.ClearAndReset() // 使用新的清屏方式
+	t.displayHeaderContent()
+}
+
+// DisplayHeaderWithoutClear 显示标题（不清屏）- 用于主循环已经清屏的情况
+func (t *Terminal) DisplayHeaderWithoutClear() {
+	t.displayHeaderContent()
+}
+
+// displayHeaderContent 标题内容（内部方法）
+func (t *Terminal) displayHeaderContent() {
 	TitleColor.Println(DrawSeparator(DisplayWidth, "="))
 	TitleColor.Println(PadRight("  Elasticsearch 生产环境监控工具 (只读安全模式)", DisplayWidth))
 	TitleColor.Println(DrawSeparator(DisplayWidth, "="))
