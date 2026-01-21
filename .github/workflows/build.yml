@@ -3,6 +3,19 @@ name: Build and Release
 on:
   push:
     branches: [ main, master ]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/**"
+      - "scripts/**"
+      - "*.sh"
+      - "*.txt"
+      - "*.log"
+      - "k8s/*"
+      - "*.yml"
+      - "LICENSE"
+      - ".editorconfig"
+      - ".gitignore"
     tags:
       - 'v*'
       - '[0-9]*'
