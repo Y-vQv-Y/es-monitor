@@ -27,6 +27,7 @@ type Monitor struct {
 	stopChan         chan struct{}
 	wg               sync.WaitGroup
 	mu               sync.Mutex
+	firstRun         bool  // 标记是否首次运行
 }
 
 // NewMonitor 创建监控器
@@ -42,6 +43,7 @@ func NewMonitor(client *client.ElasticsearchClient, cfg *config.Config) *Monitor
 		prevNodeData:     make(map[string]*display.PrevNodeMetrics),
 		prevIndexData:    make(map[string]*display.PrevIndexMetrics),
 		stopChan:         make(chan struct{}),
+		firstRun:         true,  // 首次运行标记
 	}
 }
 
@@ -80,8 +82,20 @@ func (m *Monitor) collect(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 显示标题
-	m.terminal.DisplayHeader()
+	// ========================================
+	// 【关键修复】清屏和显示标题分开处理
+	// ========================================
+	if m.firstRun {
+		// 首次运行：完全清屏
+		m.terminal.Clear()
+		m.firstRun = false
+	} else {
+		// 后续运行：固定位置刷新
+		m.terminal.ClearAndReset()
+	}
+	
+	// 显示标题（不再清屏）
+	m.terminal.DisplayHeaderWithoutClear()
 
 	// ========================================
 	// 【改动1】第一步：先采集系统指标（此时无网络请求，流量统计准确）
